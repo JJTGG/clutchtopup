@@ -27,6 +27,10 @@ type ReconcileResult = {
   providerReferences: string[];
 };
 
+type ProviderItem = {
+  status?: unknown;
+};
+
 function isTerminal(
   status: FulfillmentStatus,
 ): boolean {
@@ -36,6 +40,115 @@ function isTerminal(
   );
 }
 
+function normalizeItemStatus(
+  value: unknown,
+): "successful" | "failed" | "pending" {
+  if (value === "completed") {
+    return "successful";
+  }
+
+  if (value === "failed") {
+    return "failed";
+  }
+
+  /*
+   * GameCore has additional non-terminal item states such as
+   * pending, queued, awaiting_code and awaiting_screenshot.
+   *
+   * Unknown future states are deliberately treated as pending.
+   */
+  return "pending";
+}
+
+function deriveProviderOrderStatus(
+  rawResponse: unknown,
+  fallbackStatus: FulfillmentStatus,
+): FulfillmentStatus {
+  if (
+    !rawResponse ||
+    typeof rawResponse !== "object"
+  ) {
+    return fallbackStatus;
+  }
+
+  const response =
+    rawResponse as Record<string, unknown>;
+
+  const items = Array.isArray(response.items)
+    ? response.items as ProviderItem[]
+    : null;
+
+  /*
+   * Some GameCore failure responses do not contain an items
+   * array at all. In that case the documented order-level
+   * terminal status remains authoritative.
+   */
+  if (!items || items.length === 0) {
+    const orderStatus = response.status;
+
+    if (orderStatus === "completed") {
+      return "successful";
+    }
+
+    if (orderStatus === "failed") {
+      return "failed";
+    }
+
+    return fallbackStatus === "successful" ||
+      fallbackStatus === "failed"
+      ? fallbackStatus
+      : "pending";
+  }
+
+  const itemStatuses =
+    items.map((item) =>
+      normalizeItemStatus(item.status),
+    );
+
+  /*
+   * Every item completed.
+   */
+  if (
+    itemStatuses.every(
+      (status) => status === "successful",
+    )
+  ) {
+    return "successful";
+  }
+
+  /*
+   * Any item is still unresolved.
+   *
+   * This deliberately wins over failed items because the
+   * provider order is not fully resolved yet.
+   */
+  if (
+    itemStatuses.some(
+      (status) => status === "pending",
+    )
+  ) {
+    return "pending";
+  }
+
+  /*
+   * All items are terminal and at least one failed.
+   *
+   * GameCore calls this a failed order even when some items
+   * were successfully delivered. We preserve the complete
+   * raw response in response_data so the partial outcome is
+   * not lost.
+   */
+  if (
+    itemStatuses.some(
+      (status) => status === "failed",
+    )
+  ) {
+    return "failed";
+  }
+
+  return "pending";
+}
+
 function deriveParentStatus(
   statuses: FulfillmentStatus[],
 ): FulfillmentStatus {
@@ -43,19 +156,19 @@ function deriveParentStatus(
     return "pending";
   }
 
-  const hasProcessing = statuses.some(
-    (status) => status === "processing",
-  );
-
-  const hasPending = statuses.some(
-    (status) => status === "pending",
-  );
-
-  if (hasProcessing) {
+  if (
+    statuses.some(
+      (status) => status === "processing",
+    )
+  ) {
     return "processing";
   }
 
-  if (hasPending) {
+  if (
+    statuses.some(
+      (status) => status === "pending",
+    )
+  ) {
     return "pending";
   }
 
@@ -96,7 +209,8 @@ async function updateProviderOrder(
     .update({
       status,
       response_data: responseData,
-      updated_at: new Date().toISOString(),
+      updated_at:
+        new Date().toISOString(),
     })
     .eq("id", providerOrder.id);
 
@@ -115,22 +229,29 @@ async function saveTerminalResult(
 ) {
   const supabase = createAdminClient();
 
-  const { data: existing } = await supabase
-    .from("fulfillment_results")
-    .select("id")
-    .eq("fulfillment_request_id", requestId)
-    .maybeSingle();
+  const { data: existing } =
+    await supabase
+      .from("fulfillment_results")
+      .select("id")
+      .eq(
+        "fulfillment_request_id",
+        requestId,
+      )
+      .maybeSingle();
 
   if (existing) {
-    const { error } = await supabase
-      .from("fulfillment_results")
-      .update({
-        status,
-        provider_reference: providerReference,
-        result_data: resultData,
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", existing.id);
+    const { error } =
+      await supabase
+        .from("fulfillment_results")
+        .update({
+          status,
+          provider_reference:
+            providerReference,
+          result_data: resultData,
+          completed_at:
+            new Date().toISOString(),
+        })
+        .eq("id", existing.id);
 
     if (error) {
       throw new Error(
@@ -141,17 +262,24 @@ async function saveTerminalResult(
     return;
   }
 
-  const { error } = await supabase
-    .from("fulfillment_results")
-    .insert({
-      fulfillment_request_id: requestId,
-      status,
-      provider_reference: providerReference,
-      result_data: resultData,
-      completed_at: new Date().toISOString(),
-    });
+  const { error } =
+    await supabase
+      .from("fulfillment_results")
+      .insert({
+        fulfillment_request_id:
+          requestId,
+        status,
+        provider_reference:
+          providerReference,
+        result_data: resultData,
+        completed_at:
+          new Date().toISOString(),
+      });
 
-  if (error && error.code !== "23505") {
+  if (
+    error &&
+    error.code !== "23505"
+  ) {
     throw new Error(
       "Unable to save fulfillment result.",
     );
@@ -163,31 +291,56 @@ async function updateOrderFromFulfillmentState(
 ) {
   const supabase = createAdminClient();
 
-  const { data: items, error: itemsError } =
-    await supabase
-      .from("order_items")
-      .select("id")
-      .eq("order_id", orderId);
+  const {
+    data: items,
+    error: itemsError,
+  } = await supabase
+    .from("order_items")
+    .select("id")
+    .eq("order_id", orderId);
 
-  if (itemsError || !items?.length) {
+  if (
+    itemsError ||
+    !items?.length
+  ) {
     return;
   }
 
-  const { data: requests, error: requestsError } =
-    await supabase
-      .from("fulfillment_requests")
-      .select("order_item_id, status")
-      .eq("order_id", orderId);
+  const {
+    data: requests,
+    error: requestsError,
+  } = await supabase
+    .from("fulfillment_requests")
+    .select(
+      "order_item_id, status",
+    )
+    .eq("order_id", orderId);
 
-  if (requestsError || !requests?.length) {
+  if (
+    requestsError ||
+    !requests?.length
+  ) {
     return;
   }
 
   /*
-   * Never mark an order completed until every order item
-   * has its own fulfillment request.
+   * Every order item must have a fulfillment request before
+   * fulfillment can own the order's final state.
    */
-  if (requests.length < items.length) {
+  const requestItemIds =
+    new Set(
+      requests.map(
+        (request) =>
+          request.order_item_id,
+      ),
+    );
+
+  if (
+    items.some(
+      (item) =>
+        !requestItemIds.has(item.id),
+    )
+  ) {
     return;
   }
 
@@ -202,14 +355,6 @@ async function updateOrderFromFulfillmentState(
     | "completed"
     | "failed";
 
-  const hasProcessing = statuses.some(
-    (status) => status === "processing",
-  );
-
-  const hasPending = statuses.some(
-    (status) => status === "pending",
-  );
-
   if (
     statuses.every(
       (status) => status === "successful",
@@ -217,19 +362,12 @@ async function updateOrderFromFulfillmentState(
   ) {
     orderStatus = "completed";
   } else if (
-    hasProcessing ||
-    hasPending
+    statuses.some(
+      (status) =>
+        status === "processing" ||
+        status === "pending",
+    )
   ) {
-    /*
-     * A mixed state is still open.
-     *
-     * Example:
-     *   item A = failed
-     *   item B = pending
-     *
-     * The order must remain processing until item B
-     * reaches a terminal state.
-     */
     orderStatus = "processing";
   } else if (
     statuses.some(
@@ -241,15 +379,12 @@ async function updateOrderFromFulfillmentState(
     orderStatus = "processing";
   }
 
-  /*
-   * Only transition states that fulfillment owns.
-   * Never move a cancelled/completed/failed order backwards.
-   */
   const { error } = await supabase
     .from("orders")
     .update({
       status: orderStatus,
-      updated_at: new Date().toISOString(),
+      updated_at:
+        new Date().toISOString(),
     })
     .eq("id", orderId)
     .in("status", [
@@ -275,20 +410,25 @@ export async function reconcileFulfillment(
 
   const supabase = createAdminClient();
 
-  const { data: request, error: requestError } =
-    await supabase
-      .from("fulfillment_requests")
-      .select(`
-        id,
-        order_id,
-        provider,
-        status,
-        provider_reference
-      `)
-      .eq("id", fulfillmentRequestId)
-      .single();
+  const {
+    data: request,
+    error: requestError,
+  } = await supabase
+    .from("fulfillment_requests")
+    .select(`
+      id,
+      order_id,
+      provider,
+      status,
+      provider_reference
+    `)
+    .eq("id", fulfillmentRequestId)
+    .single();
 
-  if (requestError || !request) {
+  if (
+    requestError ||
+    !request
+  ) {
     throw new Error(
       "Fulfillment request not found.",
     );
@@ -301,14 +441,19 @@ export async function reconcileFulfillment(
     fulfillmentRequest.status ===
     "successful"
   ) {
-    const { data: existingOrders } =
-      await supabase
-        .from("fulfillment_provider_orders")
-        .select("provider_reference")
-        .eq(
-          "fulfillment_request_id",
-          fulfillmentRequest.id,
-        );
+    const {
+      data: existingOrders,
+    } = await supabase
+      .from(
+        "fulfillment_provider_orders",
+      )
+      .select(
+        "provider_reference",
+      )
+      .eq(
+        "fulfillment_request_id",
+        fulfillmentRequest.id,
+      );
 
     return {
       fulfillmentRequestId,
@@ -325,7 +470,9 @@ export async function reconcileFulfillment(
     data: providerOrders,
     error: ordersError,
   } = await supabase
-    .from("fulfillment_provider_orders")
+    .from(
+      "fulfillment_provider_orders",
+    )
     .select(`
       id,
       fulfillment_request_id,
@@ -346,12 +493,9 @@ export async function reconcileFulfillment(
     );
   }
 
-  if (!providerOrders?.length) {
-    /*
-     * No provider reference means the external submission
-     * has not been persisted. Reconciliation must not invent
-     * a result or mark the request successful.
-     */
+  if (
+    !providerOrders?.length
+  ) {
     return {
       fulfillmentRequestId,
       status:
@@ -371,16 +515,15 @@ export async function reconcileFulfillment(
   const refreshedStatuses:
     FulfillmentStatus[] = [];
 
-  for (const row of providerOrders) {
+  const refreshedResponses:
+    Record<string, unknown>[] = [];
+
+  for (
+    const row of providerOrders
+  ) {
     const providerOrder =
       row as ProviderOrder;
 
-    /*
-     * Poll every child provider order independently.
-     *
-     * One internal fulfillment request may produce
-     * multiple GameCore order codes.
-     */
     let statusResult;
 
     try {
@@ -390,27 +533,57 @@ export async function reconcileFulfillment(
         );
     } catch {
       /*
-       * A provider lookup failure is not equivalent to
-       * fulfillment failure. Keep terminal states terminal
-       * and keep non-terminal states alive for the next sweep.
+       * Provider lookup failure is uncertainty,
+       * not fulfillment failure.
        */
-      refreshedStatuses.push(
-        isTerminal(providerOrder.status)
+      const preservedStatus =
+        isTerminal(
+          providerOrder.status,
+        )
           ? providerOrder.status
-          : "pending",
+          : "pending";
+
+      refreshedStatuses.push(
+        preservedStatus,
+      );
+
+      refreshedResponses.push(
+        providerOrder.response_data,
       );
 
       continue;
     }
 
+    const derivedStatus =
+      deriveProviderOrderStatus(
+        statusResult.rawResponse,
+        statusResult.status,
+      );
+
     await updateProviderOrder(
       providerOrder,
-      statusResult.status,
+      derivedStatus,
       statusResult.rawResponse,
     );
 
     refreshedStatuses.push(
-      statusResult.status,
+      derivedStatus,
+    );
+
+    refreshedResponses.push(
+      statusResult.rawResponse &&
+      typeof statusResult.rawResponse ===
+        "object"
+        ? (
+            statusResult.rawResponse as Record<
+              string,
+              unknown
+            >
+          )
+        : {
+            rawResponse:
+              statusResult.rawResponse,
+          },
     );
   }
 
@@ -420,7 +593,8 @@ export async function reconcileFulfillment(
     );
 
   const primaryReference =
-    providerOrders[0]?.provider_reference ??
+    providerOrders[0]
+      ?.provider_reference ??
     fulfillmentRequest.provider_reference;
 
   const responseData = {
@@ -431,10 +605,15 @@ export async function reconcileFulfillment(
         (order) =>
           order.provider_reference,
       ),
-    statuses: refreshedStatuses,
+    statuses:
+      refreshedStatuses,
+    providerResponses:
+      refreshedResponses,
   };
 
-  if (isTerminal(parentStatus)) {
+  if (
+    isTerminal(parentStatus)
+  ) {
     await saveTerminalResult(
       fulfillmentRequest.id,
       parentStatus,
@@ -451,7 +630,8 @@ export async function reconcileFulfillment(
       status: parentStatus,
       provider_reference:
         primaryReference ?? null,
-      response_data: responseData,
+      response_data:
+        responseData,
       updated_at:
         new Date().toISOString(),
     })
