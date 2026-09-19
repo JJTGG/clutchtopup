@@ -10,6 +10,16 @@ export type PlayerIdentifier = {
   value: string;
 };
 
+export type FulfillmentFieldType = "text" | "number";
+
+export type ProviderFulfillmentField = {
+  key: string;
+  label: string;
+  type: FulfillmentFieldType;
+  required: boolean;
+  placeholder?: string;
+};
+
 export type FulfillmentRequest = {
   productId: string;
   gameSlug: string;
@@ -20,13 +30,21 @@ export type FulfillmentRequest = {
 };
 
 export type ProviderProduct = {
+  provider: string;
   providerProductId: string;
-  name: string;
+
   gameSlug: string;
+  name: string;
+
   region?: string;
   currency: string;
+
   cost: number;
   available: boolean;
+
+  fulfillmentFields: ProviderFulfillmentField[];
+
+  metadata?: Record<string, unknown>;
 };
 
 export type FulfillmentSubmission = {
