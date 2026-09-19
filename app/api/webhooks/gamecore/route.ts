@@ -84,26 +84,105 @@ function isValidWebhook(
   const payload =
     value as Record<string, unknown>;
 
-  const data =
-    payload.data;
+  const data = payload.data;
+
+  if (
+    typeof payload.event_id !== "string" ||
+    payload.event_id.length === 0
+  ) {
+    return false;
+  }
+
+  if (
+    payload.event_type !==
+      "order.completed" &&
+    payload.event_type !==
+      "order.failed"
+  ) {
+    return false;
+  }
+
+  if (
+    typeof payload.occurred_at !==
+    "string"
+  ) {
+    return false;
+  }
+
+  if (
+    typeof data !== "object" ||
+    data === null
+  ) {
+    return false;
+  }
+
+  const webhookData =
+    data as Record<string, unknown>;
+
+  if (
+    typeof webhookData.orderCode !==
+    "string" ||
+    webhookData.orderCode.length === 0
+  ) {
+    return false;
+  }
+
+  const expectedStatus =
+    payload.event_type ===
+    "order.completed"
+      ? "completed"
+      : "failed";
 
   return (
-    typeof payload.event_id === "string" &&
-    payload.event_id.length > 0 &&
-    (
-      payload.event_type ===
-        "order.completed" ||
-      payload.event_type ===
-        "order.failed"
-    ) &&
-    typeof payload.occurred_at === "string" &&
-    typeof data === "object" &&
-    data !== null &&
-    typeof (data as Record<string, unknown>)
-      .orderCode === "string" &&
-    typeof (data as Record<string, unknown>)
-      .status === "string"
+    webhookData.status ===
+    expectedStatus
   );
+}
+
+async function processWebhookEvent(
+  eventId: string,
+  providerReference: string,
+) {
+  const supabase =
+    createAdminClient();
+
+  const { data: providerOrder } =
+    await supabase
+      .from("fulfillment_provider_orders")
+      .select("fulfillment_request_id")
+      .eq("provider", PROVIDER)
+      .eq(
+        "provider_reference",
+        providerReference,
+      )
+      .maybeSingle();
+
+  if (!providerOrder) {
+    throw new Error(
+      "Provider order has not been persisted yet.",
+    );
+  }
+
+  await reconcileFulfillment(
+    providerOrder.fulfillment_request_id,
+  );
+
+  const { error } =
+    await supabase
+      .from("fulfillment_webhook_events")
+      .update({
+        status: "processed",
+        processed_at:
+          new Date().toISOString(),
+        error_message: null,
+      })
+      .eq("id", eventId);
+
+  if (error) {
+    throw new Error(
+      "Unable to mark webhook event as processed.",
+    );
+  }
 }
 
 export async function POST(
@@ -140,7 +219,10 @@ export async function POST(
 
   if (!validSignature) {
     return NextResponse.json(
-      { error: "Invalid webhook signature." },
+      {
+        error:
+          "Invalid webhook signature.",
+      },
       { status: 401 },
     );
   }
@@ -151,122 +233,223 @@ export async function POST(
     payload = JSON.parse(rawBody);
   } catch {
     return NextResponse.json(
-      { error: "Invalid webhook payload." },
+      {
+        error:
+          "Invalid webhook payload.",
+      },
       { status: 400 },
     );
   }
 
   if (!isValidWebhook(payload)) {
     return NextResponse.json(
-      { error: "Invalid webhook payload." },
+      {
+        error:
+          "Invalid webhook payload.",
+      },
       { status: 400 },
     );
   }
 
   const event = payload;
+
+  const headerEvent =
+    request.headers.get(
+      "x-webhook-event",
+    );
+
+  /*
+   * The body event_type is authoritative.
+   * If GameCore also supplies the event header,
+   * reject a disagreement rather than processing
+   * an ambiguous event.
+   */
+  if (
+    headerEvent &&
+    headerEvent !== event.event_type
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Webhook event type mismatch.",
+      },
+      { status: 400 },
+    );
+  }
+
+  /*
+   * GameCore documents X-Idempotency-Key as the
+   * stable event ID across retries. We store the
+   * payload event_id as the event identity too,
+   * but use the documented payload event_id as
+   * our database deduplication key because the
+   * current table schema is built around event_id.
+   */
   const providerReference =
     event.data.orderCode;
 
   const supabase =
     createAdminClient();
 
-  /*
-   * Store the event before doing any external
-   * reconciliation work.
-   */
-  const { data: insertedEvent, error: insertError } =
-    await supabase
-      .from("fulfillment_webhook_events")
-      .insert({
-        provider: PROVIDER,
-        event_id: event.event_id,
-        event_type: event.event_type,
-        provider_reference: providerReference,
-        payload: event,
-        status: "received",
-      })
-      .select("id, status")
-      .single();
+  const {
+    data: insertedEvent,
+    error: insertError,
+  } = await supabase
+    .from(
+      "fulfillment_webhook_events",
+    )
+    .insert({
+      provider: PROVIDER,
+      event_id: event.event_id,
+      event_type: event.event_type,
+      provider_reference:
+        providerReference,
+      payload: event,
+      status: "received",
+    })
+    .select("id, status")
+    .single();
+
+  let eventId =
+    insertedEvent?.id ?? null;
 
   if (insertError) {
-    /*
-     * Duplicate event delivery.
-     */
-    if (insertError.code === "23505") {
-      const { data: existing } =
-        await supabase
-          .from("fulfillment_webhook_events")
-          .select("status")
-          .eq("provider", PROVIDER)
-          .eq("event_id", event.event_id)
-          .maybeSingle();
-
-      if (
-        existing?.status === "processed" ||
-        existing?.status === "processing"
-      ) {
-        return NextResponse.json({
-          received: true,
-        });
-      }
-
-      /*
-       * A previously failed event can be retried.
-       * Fall through and claim it below.
-       */
-    } else {
+    if (insertError.code !== "23505") {
       console.error(
         "Unable to store GameCore webhook:",
         insertError,
       );
 
       return NextResponse.json(
-        { error: "Unable to store webhook." },
+        {
+          error:
+            "Unable to store webhook.",
+        },
         { status: 500 },
       );
     }
-  }
 
-  let eventId =
-    insertedEvent?.id ?? null;
+    /*
+     * Existing event delivery.
+     */
+    const {
+      data: existing,
+      error: existingError,
+    } = await supabase
+      .from(
+        "fulfillment_webhook_events",
+      )
+      .select("id, status")
+      .eq("provider", PROVIDER)
+      .eq(
+        "event_id",
+        event.event_id,
+      )
+      .maybeSingle();
 
-  if (!eventId) {
-    const { data: existing } =
-      await supabase
-        .from("fulfillment_webhook_events")
-        .select("id, status")
-        .eq("provider", PROVIDER)
-        .eq("event_id", event.event_id)
-        .single();
+    if (existingError) {
+      console.error(
+        "Unable to load existing webhook event:",
+        existingError,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Unable to load webhook event.",
+        },
+        { status: 500 },
+      );
+    }
 
     if (!existing) {
       return NextResponse.json(
-        { error: "Webhook event not found." },
+        {
+          error:
+            "Webhook event not found.",
+        },
         { status: 500 },
       );
     }
 
     if (
-      existing.status === "processed" ||
-      existing.status === "processing"
+      existing.status ===
+      "processed"
     ) {
       return NextResponse.json({
         received: true,
       });
     }
 
+    /*
+     * IMPORTANT:
+     *
+     * A previous worker may have crashed after
+     * changing this event to "processing".
+     *
+     * Do not blindly acknowledge it. We attempt
+     * reconciliation again. The reconciliation
+     * path is designed to be idempotent, so a
+     * concurrent worker doing the same work is safe.
+     */
     eventId = existing.id;
   }
 
   /*
-   * Claim the event.
+   * Claim received/failed events.
    *
-   * Only one worker gets to process a received/failed
-   * event. Concurrent duplicate deliveries are harmless.
+   * Processing events are intentionally allowed
+   * to continue below so a crashed worker cannot
+   * permanently strand the event.
    */
-  const { data: claimed } =
-    await supabase
-      .from("fulfillment_webhook_events")
+  const {
+    data: currentEvent,
+    error: currentEventError,
+  } = await supabase
+    .from(
+      "fulfillment_webhook_events",
+    )
+    .select("status")
+    .eq("id", eventId)
+    .single();
+
+  if (currentEventError) {
+    console.error(
+      "Unable to read webhook event state:",
+      currentEventError,
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unable to read webhook event.",
+      },
+      { status: 500 },
+    );
+  }
+
+  if (
+    currentEvent.status ===
+    "processed"
+  ) {
+    return NextResponse.json({
+      received: true,
+    });
+  }
+
+  if (
+    currentEvent.status ===
+      "received" ||
+    currentEvent.status ===
+      "failed"
+  ) {
+    const {
+      data: claimed,
+      error: claimError,
+    } = await supabase
+      .from(
+        "fulfillment_webhook_events",
+      )
       .update({
         status: "processing",
         error_message: null,
@@ -279,60 +462,43 @@ export async function POST(
       .select("id")
       .maybeSingle();
 
-  if (!claimed) {
-    return NextResponse.json({
-      received: true,
-    });
+    if (claimError) {
+      console.error(
+        "Unable to claim webhook event:",
+        claimError,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Unable to process webhook.",
+        },
+        { status: 500 },
+      );
+    }
+
+    /*
+     * Another worker claimed it between our
+     * state read and update. It is safe to
+     * acknowledge because that worker owns it.
+     */
+    if (!claimed) {
+      return NextResponse.json({
+        received: true,
+      });
+    }
   }
 
   /*
-   * Find the internal provider-order record.
-   *
-   * A webhook can theoretically arrive before the original
-   * POST response has finished persisting its provider code.
-   * Returning 500 makes GameCore retry rather than losing it.
+   * If the event was already processing, we still
+   * reconcile it. This specifically recovers from
+   * a crashed handler that left the row stranded.
    */
-  const { data: providerOrder } =
-    await supabase
-      .from("fulfillment_provider_orders")
-      .select("fulfillment_request_id")
-      .eq("provider", PROVIDER)
-      .eq(
-        "provider_reference",
-        providerReference,
-      )
-      .maybeSingle();
-
-  if (!providerOrder) {
-    await supabase
-      .from("fulfillment_webhook_events")
-      .update({
-        status: "failed",
-        error_message:
-          "Provider order has not been persisted yet.",
-      })
-      .eq("id", eventId);
-
-    return NextResponse.json(
-      { error: "Provider order not found yet." },
-      { status: 500 },
-    );
-  }
-
   try {
-    await reconcileFulfillment(
-      providerOrder.fulfillment_request_id,
+    await processWebhookEvent(
+      eventId,
+      providerReference,
     );
-
-    await supabase
-      .from("fulfillment_webhook_events")
-      .update({
-        status: "processed",
-        processed_at:
-          new Date().toISOString(),
-        error_message: null,
-      })
-      .eq("id", eventId);
 
     return NextResponse.json({
       received: true,
@@ -341,10 +507,12 @@ export async function POST(
     const message =
       error instanceof Error
         ? error.message
-        : "Webhook reconciliation failed.";
+        : "Webhook processing failed.";
 
     await supabase
-      .from("fulfillment_webhook_events")
+      .from(
+        "fulfillment_webhook_events",
+      )
       .update({
         status: "failed",
         error_message: message,
@@ -356,8 +524,17 @@ export async function POST(
       error,
     );
 
+    /*
+     * 5xx tells GameCore to retry the event.
+     * This is important when the provider order has
+     * not reached our database yet or reconciliation
+     * encounters a transient failure.
+     */
     return NextResponse.json(
-      { error: "Webhook processing failed." },
+      {
+        error:
+          "Webhook processing failed.",
+      },
       { status: 500 },
     );
   }
