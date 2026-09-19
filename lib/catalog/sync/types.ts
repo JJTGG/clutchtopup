@@ -6,6 +6,7 @@ export type ProviderCatalog = {
 };
 
 export type CatalogProductSnapshot = {
+  productId: string;
   provider: string;
   providerProductId: string;
   gameSlug: string;
@@ -17,20 +18,28 @@ export type CatalogProductSnapshot = {
   fulfillmentFields: ProviderProduct["fulfillmentFields"];
 };
 
+export type CatalogProductMatch = {
+  providerProductId: string;
+  productId: string;
+};
+
 export type CatalogSyncDecision =
   | {
       type: "create";
       product: ProviderProduct;
+      productId: string;
     }
   | {
       type: "update";
       product: ProviderProduct;
       previous: CatalogProductSnapshot;
+      productId: string;
     }
   | {
       type: "review";
       product: ProviderProduct;
-      previous: CatalogProductSnapshot;
+      previous?: CatalogProductSnapshot;
+      productId?: string;
       reasons: string[];
     }
   | {
@@ -40,6 +49,7 @@ export type CatalogSyncDecision =
   | {
       type: "unchanged";
       product: ProviderProduct;
+      productId: string;
     };
 
 export type CatalogSyncResult = {
