@@ -1,14 +1,12 @@
 import type { ProviderProduct } from "@/lib/fulfillment/types";
 import type {
+  CatalogProductMatch,
   CatalogProductSnapshot,
   CatalogSyncResult,
   ProviderCatalog,
 } from "@/lib/catalog/sync/types";
 
-function productKey(
-  provider: string,
-  providerProductId: string,
-) {
+function productKey(provider: string, providerProductId: string) {
   return `${provider}:${providerProductId}`;
 }
 
@@ -73,6 +71,7 @@ function hasSafeChange(
 export function reconcileCatalog(
   catalog: ProviderCatalog,
   existing: CatalogProductSnapshot[],
+  matches: CatalogProductMatch[] = [],
 ): CatalogSyncResult {
   if (!catalog.complete) {
     return {
@@ -80,23 +79,19 @@ export function reconcileCatalog(
       decisions: [],
       rejected: [
         {
-          reason:
-            "Provider catalog response is incomplete.",
+          reason: "Provider catalog response is incomplete.",
         },
       ],
     };
   }
 
-  const incoming = catalog.products;
-
-  if (incoming.length === 0) {
+  if (catalog.products.length === 0) {
     return {
       aborted: true,
       decisions: [],
       rejected: [
         {
-          reason:
-            "Provider catalog response is empty.",
+          reason: "Provider catalog response is empty.",
         },
       ],
     };
@@ -107,17 +102,18 @@ export function reconcileCatalog(
 
   const existingMap = new Map(
     existing.map((product) => [
-      productKey(
-        product.provider,
-        product.providerProductId,
-      ),
+      productKey(product.provider, product.providerProductId),
       product,
     ]),
   );
 
+  const matchMap = new Map(
+    matches.map((match) => [match.providerProductId, match.productId]),
+  );
+
   const seen = new Set<string>();
 
-  for (const product of incoming) {
+  for (const product of catalog.products) {
     if (!isValidProduct(product)) {
       rejected.push({
         providerProductId:
@@ -148,55 +144,91 @@ export function reconcileCatalog(
 
     const previous = existingMap.get(key);
 
-    if (!previous) {
-      decisions.push({
-        type: "create",
+    /*
+     * Existing mappings already know which ClutchTopUp product
+     * they belong to.
+     */
+    if (previous) {
+      const identityChangeReasons = hasIdentityChange(
         product,
+        previous,
+      );
+
+      if (identityChangeReasons.length > 0) {
+        decisions.push({
+          type: "review",
+          product,
+          previous,
+          productId: previous.productId,
+          reasons: identityChangeReasons,
+        });
+
+        continue;
+      }
+
+      if (hasSafeChange(product, previous)) {
+        decisions.push({
+          type: "update",
+          product,
+          previous,
+          productId: previous.productId,
+        });
+
+        continue;
+      }
+
+      decisions.push({
+        type: "unchanged",
+        product,
+        productId: previous.productId,
       });
 
       continue;
     }
 
-    const identityChangeReasons = hasIdentityChange(
-      product,
-      previous,
-    );
+    /*
+     * New provider products MUST have an explicit
+     * ClutchTopUp product mapping.
+     */
+    const productId = matchMap.get(product.providerProductId);
 
-    if (identityChangeReasons.length > 0) {
+    if (!productId) {
       decisions.push({
         type: "review",
         product,
-        previous,
-        reasons: identityChangeReasons,
+        reasons: [
+          "No ClutchTopUp product mapping exists.",
+        ],
       });
 
       continue;
     }
 
-    if (hasSafeChange(product, previous)) {
+    if (productId.trim().length === 0) {
       decisions.push({
-        type: "update",
+        type: "review",
         product,
-        previous,
+        reasons: [
+          "ClutchTopUp product mapping is empty.",
+        ],
       });
 
       continue;
     }
 
     decisions.push({
-      type: "unchanged",
+      type: "create",
       product,
+      productId,
     });
   }
 
-  if (rejected.length > 0) {
-    return {
-      aborted: true,
-      decisions: [],
-      rejected,
-    };
-  }
-
+  /*
+   * A provider product missing from a complete catalog response
+   * is considered unavailable at the provider level.
+   *
+   * We deactivate only the provider mapping later.
+   */
   for (const previous of existing) {
     const key = productKey(
       previous.provider,
