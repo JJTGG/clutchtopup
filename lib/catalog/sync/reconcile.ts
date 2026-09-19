@@ -2,6 +2,7 @@ import type { ProviderProduct } from "@/lib/fulfillment/types";
 import type {
   CatalogProductSnapshot,
   CatalogSyncResult,
+  ProviderCatalog,
 } from "@/lib/catalog/sync/types";
 
 function productKey(
@@ -70,11 +71,23 @@ function hasSafeChange(
 }
 
 export function reconcileCatalog(
-  incoming: ProviderProduct[],
+  catalog: ProviderCatalog,
   existing: CatalogProductSnapshot[],
 ): CatalogSyncResult {
-  const decisions: CatalogSyncResult["decisions"] = [];
-  const rejected: CatalogSyncResult["rejected"] = [];
+  if (!catalog.complete) {
+    return {
+      aborted: true,
+      decisions: [],
+      rejected: [
+        {
+          reason:
+            "Provider catalog response is incomplete.",
+        },
+      ],
+    };
+  }
+
+  const incoming = catalog.products;
 
   if (incoming.length === 0) {
     return {
@@ -82,11 +95,15 @@ export function reconcileCatalog(
       decisions: [],
       rejected: [
         {
-          reason: "Provider catalog response is empty.",
+          reason:
+            "Provider catalog response is empty.",
         },
       ],
     };
   }
+
+  const decisions: CatalogSyncResult["decisions"] = [];
+  const rejected: CatalogSyncResult["rejected"] = [];
 
   const existingMap = new Map(
     existing.map((product) => [
