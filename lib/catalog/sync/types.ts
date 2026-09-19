@@ -23,6 +23,12 @@ export type CatalogSyncDecision =
       previous: CatalogProductSnapshot;
     }
   | {
+      type: "review";
+      product: ProviderProduct;
+      previous: CatalogProductSnapshot;
+      reasons: string[];
+    }
+  | {
       type: "deactivate";
       previous: CatalogProductSnapshot;
     }
@@ -32,6 +38,7 @@ export type CatalogSyncDecision =
     };
 
 export type CatalogSyncResult = {
+  aborted: boolean;
   decisions: CatalogSyncDecision[];
   rejected: Array<{
     providerProductId?: string;
