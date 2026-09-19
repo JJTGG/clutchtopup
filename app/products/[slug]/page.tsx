@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getGameBySlug } from "@/lib/catalog/queries";
 
@@ -36,6 +37,12 @@ export default async function GameProductsPage({
                 <strong>
                   {product.currency} {product.price}
                 </strong>
+
+                <div>
+                  <Link href={`/checkout/${product.id}`}>
+                    Continue to Checkout
+                  </Link>
+                </div>
               </article>
             ))}
           </div>
