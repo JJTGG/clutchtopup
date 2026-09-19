@@ -15,6 +15,7 @@ type SearchParams = {
   created?: string;
   updated?: string;
   deactivated?: string;
+  [key: string]: string | undefined;
 };
 
 export default async function AdminCatalogPage({
@@ -33,6 +34,13 @@ export default async function AdminCatalogPage({
 
   const gameSlug =
     params.game ?? options.games[0]?.slug ?? "";
+
+  const matches = Object.entries(params)
+    .filter(([key, value]) => key.startsWith("match:") && value)
+    .map(([key, value]) => ({
+      providerProductId: key.slice("match:".length),
+      productId: value as string,
+    }));
 
   let products: Awaited<
     ReturnType<typeof getProductsForGame>
@@ -53,6 +61,7 @@ export default async function AdminCatalogPage({
       preview = await previewCatalogSync(
         providerName,
         gameSlug,
+        matches,
       );
     } catch (error) {
       previewError =
@@ -61,6 +70,11 @@ export default async function AdminCatalogPage({
           : "Unable to load provider catalog.";
     }
   }
+
+  const reviewCount =
+    preview?.result.decisions.filter(
+      (decision) => decision.type === "review",
+    ).length ?? 0;
 
   return (
     <main className="admin-shell">
@@ -126,6 +140,33 @@ export default async function AdminCatalogPage({
           </select>
         </label>
 
+        {preview &&
+          preview.result.decisions.map((decision) => {
+            if (
+              decision.type !== "review" ||
+              decision.previous
+            ) {
+              return null;
+            }
+
+            const providerProduct =
+              decision.product;
+
+            const currentMatch =
+              params[
+                `match:${providerProduct.providerProductId}`
+              ] ?? "";
+
+            return (
+              <input
+                key={`hidden-match-${providerProduct.providerProductId}`}
+                type="hidden"
+                name={`match:${providerProduct.providerProductId}`}
+                value={currentMatch}
+              />
+            );
+          })}
+
         <button type="submit">
           Preview catalog
         </button>
@@ -135,8 +176,8 @@ export default async function AdminCatalogPage({
         <section className="admin-empty">
           <h2>No games configured</h2>
           <p>
-            Add the initial active games before running catalog
-            synchronization.
+            Add the initial active games before running
+            catalog synchronization.
           </p>
         </section>
       )}
@@ -181,36 +222,39 @@ export default async function AdminCatalogPage({
             <>
               <div className="admin-summary">
                 <span>
-                  {preview.result.decisions.filter(
-                    (item) => item.type === "create",
-                  ).length}{" "}
+                  {
+                    preview.result.decisions.filter(
+                      (item) => item.type === "create",
+                    ).length
+                  }{" "}
                   create
                 </span>
 
                 <span>
-                  {preview.result.decisions.filter(
-                    (item) => item.type === "update",
-                  ).length}{" "}
+                  {
+                    preview.result.decisions.filter(
+                      (item) => item.type === "update",
+                    ).length
+                  }{" "}
                   update
                 </span>
 
                 <span>
-                  {preview.result.decisions.filter(
-                    (item) => item.type === "deactivate",
-                  ).length}{" "}
+                  {
+                    preview.result.decisions.filter(
+                      (item) => item.type === "deactivate",
+                    ).length
+                  }{" "}
                   deactivate
                 </span>
 
                 <span>
-                  {preview.result.decisions.filter(
-                    (item) => item.type === "review",
-                  ).length}{" "}
-                  review
+                  {reviewCount} review
                 </span>
               </div>
 
               <form
-                action={applyCatalogAction}
+                method="get"
                 className="admin-sync-form"
               >
                 <input
@@ -270,13 +314,20 @@ export default async function AdminCatalogPage({
                             </p>
                           </div>
 
-                          {decision.type === "review" &&
+                          {decision.type ===
+                            "review" &&
                             !decision.previous && (
                               <label className="admin-map">
-                                Map to ClutchTopUp product
+                                Map to ClutchTopUp
+                                product
+
                                 <select
                                   name={`match:${providerProduct.providerProductId}`}
-                                  defaultValue=""
+                                  defaultValue={
+                                    params[
+                                      `match:${providerProduct.providerProductId}`
+                                    ] ?? ""
+                                  }
                                 >
                                   <option value="">
                                     Select product
@@ -296,7 +347,8 @@ export default async function AdminCatalogPage({
                               </label>
                             )}
 
-                          {decision.type === "review" && (
+                          {decision.type ===
+                            "review" && (
                             <p className="error">
                               {decision.reasons.join(
                                 " ",
@@ -309,23 +361,34 @@ export default async function AdminCatalogPage({
                   )}
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={preview.result.decisions.some(
-                    (decision) =>
-                      decision.type === "review",
-                  )}
-                >
-                  Apply approved synchronization
-                </button>
+                {reviewCount > 0 ? (
+                  <button type="submit">
+                    Preview with mappings
+                  </button>
+                ) : (
+                  <>
+                    {matches.map((match) => (
+                      <input
+                        key={`${match.providerProductId}-${match.productId}`}
+                        type="hidden"
+                        name={`match:${match.providerProductId}`}
+                        value={match.productId}
+                      />
+                    ))}
 
-                {preview.result.decisions.some(
-                  (decision) =>
-                    decision.type === "review",
-                ) && (
+                    <button
+                      type="submit"
+                      formAction={applyCatalogAction}
+                    >
+                      Apply approved synchronization
+                    </button>
+                  </>
+                )}
+
+                {reviewCount > 0 && (
                   <p className="notice">
-                    Resolve every review item before applying
-                    the synchronization.
+                    Resolve every review item, then preview
+                    again before applying the synchronization.
                   </p>
                 )}
               </form>
