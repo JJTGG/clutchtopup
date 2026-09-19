@@ -9,7 +9,11 @@ import type {
 export interface FulfillmentProvider {
   readonly name: string;
 
-  getProducts(): Promise<ProviderProduct[]>;
+  /**
+   * GameCore and similar providers may expose their catalog
+   * through game-scoped endpoints rather than one global endpoint.
+   */
+  getProducts(gameSlug: string): Promise<ProviderProduct[]>;
 
   submit(request: FulfillmentRequest): Promise<FulfillmentSubmission>;
 
