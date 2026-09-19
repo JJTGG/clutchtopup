@@ -5,6 +5,7 @@ import { getProvider } from "@/lib/fulfillment/providers";
 import type {
   FulfillmentRequest,
   FulfillmentStatus,
+  ProviderFulfillmentField,
 } from "@/lib/fulfillment/types";
 
 type FulfillmentOrderItem = {
@@ -98,41 +99,108 @@ function toStringRecord(
   return result;
 }
 
+function parseProviderFields(
+  value: unknown,
+): ProviderFulfillmentField[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (field): field is ProviderFulfillmentField =>
+      typeof field === "object" &&
+      field !== null &&
+      typeof (field as Record<string, unknown>).key ===
+        "string" &&
+      typeof (field as Record<string, unknown>).label ===
+        "string" &&
+      typeof (field as Record<string, unknown>).type ===
+        "string" &&
+      typeof (field as Record<string, unknown>).required ===
+        "boolean",
+  );
+}
+
+function validateProviderFulfillmentData(
+  fields: ProviderFulfillmentField[],
+  data: Record<string, string>,
+) {
+  for (const field of fields) {
+    const value = data[field.key];
+
+    if (
+      field.required &&
+      (!value || value.trim().length === 0)
+    ) {
+      throw new Error(
+        `${field.label} is required for fulfillment.`,
+      );
+    }
+
+    if (
+      value &&
+      field.type === "number" &&
+      !Number.isFinite(Number(value))
+    ) {
+      throw new Error(
+        `${field.label} must be a valid number.`,
+      );
+    }
+
+    if (
+      value &&
+      field.type === "select" &&
+      field.options?.length &&
+      !field.options.includes(value)
+    ) {
+      throw new Error(
+        `${field.label} has an invalid selection.`,
+      );
+    }
+  }
+}
+
 async function getOrderContext(
   orderId: string,
   orderItemId: string,
 ) {
   const supabase = createAdminClient();
 
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .select("id, order_number, status, currency")
-    .eq("id", orderId)
-    .single();
+  const { data: order, error: orderError } =
+    await supabase
+      .from("orders")
+      .select(
+        "id, order_number, status, currency",
+      )
+      .eq("id", orderId)
+      .single();
 
   if (orderError || !order) {
     throw new Error("Order not found.");
   }
 
-  const { data: item, error: itemError } = await supabase
-    .from("order_items")
-    .select(
-      "id, order_id, product_id, product_name, quantity",
-    )
-    .eq("id", orderItemId)
-    .eq("order_id", orderId)
-    .single();
+  const { data: item, error: itemError } =
+    await supabase
+      .from("order_items")
+      .select(
+        "id, order_id, product_id, product_name, quantity",
+      )
+      .eq("id", orderItemId)
+      .eq("order_id", orderId)
+      .single();
 
   if (itemError || !item) {
     throw new Error("Order item not found.");
   }
 
-  const { data: fulfillmentData, error: dataError } =
-    await supabase
-      .from("order_fulfillment_data")
-      .select("data")
-      .eq("order_id", orderId)
-      .single();
+  const {
+    data: fulfillmentData,
+    error: dataError,
+  } = await supabase
+    .from("order_fulfillment_data")
+    .select("data")
+    .eq("order_id", orderId)
+    .single();
 
   if (dataError || !fulfillmentData) {
     throw new Error(
@@ -211,29 +279,25 @@ async function getOrCreateFulfillmentRequest(
 ): Promise<FulfillmentRequestRow> {
   const supabase = createAdminClient();
 
-  /*
-   * The key is deterministic and persisted before the provider call.
-   *
-   * This means every retry of this exact fulfillment intent uses
-   * the same external idempotency key.
-   */
   const idempotencyKey =
     `fulfillment:${item.id}:${providerName}`;
 
+  const selectFields = `
+    id,
+    order_id,
+    order_item_id,
+    provider,
+    provider_reference,
+    idempotency_key,
+    status,
+    request_data,
+    response_data,
+    attempt
+  `;
+
   const { data: existing } = await supabase
     .from("fulfillment_requests")
-    .select(`
-      id,
-      order_id,
-      order_item_id,
-      provider,
-      provider_reference,
-      idempotency_key,
-      status,
-      request_data,
-      response_data,
-      attempt
-    `)
+    .select(selectFields)
     .eq("order_item_id", item.id)
     .eq("provider", providerName)
     .maybeSingle();
@@ -252,42 +316,16 @@ async function getOrCreateFulfillmentRequest(
       status: "queued",
       request_data: requestData,
       response_data: {},
-      attempt: 1,
+      attempt: 0,
     })
-    .select(`
-      id,
-      order_id,
-      order_item_id,
-      provider,
-      provider_reference,
-      idempotency_key,
-      status,
-      request_data,
-      response_data,
-      attempt
-    `)
+    .select(selectFields)
     .single();
 
-  /*
-   * Another worker may have won the race between our SELECT
-   * and INSERT. The unique constraint makes that safe.
-   */
   if (error) {
     if (error.code === "23505") {
       const { data: raced } = await supabase
         .from("fulfillment_requests")
-        .select(`
-          id,
-          order_id,
-          order_item_id,
-          provider,
-          provider_reference,
-          idempotency_key,
-          status,
-          request_data,
-          response_data,
-          attempt
-        `)
+        .select(selectFields)
         .eq("order_item_id", item.id)
         .eq("provider", providerName)
         .single();
@@ -317,12 +355,6 @@ async function claimFulfillmentRequest(
 ): Promise<boolean> {
   const supabase = createAdminClient();
 
-  /*
-   * Only a queued request can be claimed.
-   *
-   * If two workers reach this point simultaneously, only one
-   * UPDATE can transition the row from queued -> processing.
-   */
   const { data, error } = await supabase
     .from("fulfillment_requests")
     .update({
@@ -344,6 +376,60 @@ async function claimFulfillmentRequest(
   return Boolean(data);
 }
 
+async function recoverStaleProcessingRequest(
+  fulfillmentRequest: FulfillmentRequestRow,
+): Promise<{
+  shouldSubmit: boolean;
+  providerReferences: string[];
+}> {
+  const supabase = createAdminClient();
+
+  const {
+    data: children,
+    error,
+  } = await supabase
+    .from("fulfillment_provider_orders")
+    .select("provider_reference")
+    .eq(
+      "fulfillment_request_id",
+      fulfillmentRequest.id,
+    );
+
+  if (error) {
+    throw new Error(
+      "Unable to inspect existing provider orders.",
+    );
+  }
+
+  const providerReferences =
+    children?.map(
+      (child) => child.provider_reference,
+    ) ?? [];
+
+  /*
+   * If a provider reference exists, the external order
+   * definitely exists. Do not submit again.
+   */
+  if (providerReferences.length > 0) {
+    return {
+      shouldSubmit: false,
+      providerReferences,
+    };
+  }
+
+  /*
+   * No provider reference means the previous worker either
+   * crashed before the external call or lost the response.
+   *
+   * The same deterministic idempotency key makes retrying
+   * safe even if GameCore accepted the original request.
+   */
+  return {
+    shouldSubmit: true,
+    providerReferences: [],
+  };
+}
+
 async function persistSubmission(
   fulfillmentRequest: FulfillmentRequestRow,
   providerReferences: string[],
@@ -352,24 +438,71 @@ async function persistSubmission(
 ) {
   const supabase = createAdminClient();
 
+  const responseData =
+    rawResponse &&
+    typeof rawResponse === "object"
+      ? (rawResponse as Record<string, unknown>)
+      : { rawResponse };
+
+  /*
+   * Validate all provider references before modifying
+   * the fulfillment request.
+   */
+  if (providerReferences.length > 0) {
+    const { data: existingOrders, error } =
+      await supabase
+        .from("fulfillment_provider_orders")
+        .select(
+          "provider_reference, fulfillment_request_id",
+        )
+        .eq(
+          "provider",
+          fulfillmentRequest.provider,
+        )
+        .in(
+          "provider_reference",
+          providerReferences,
+        );
+
+    if (error) {
+      throw new Error(
+        "Unable to validate provider order references.",
+      );
+    }
+
+    const foreignReference =
+      existingOrders?.find(
+        (row) =>
+          row.fulfillment_request_id !==
+          fulfillmentRequest.id,
+      );
+
+    if (foreignReference) {
+      throw new Error(
+        `Provider reference collision detected: ${foreignReference.provider_reference}.`,
+      );
+    }
+  }
+
   const primaryReference =
     providerReferences[0] ??
     fulfillmentRequest.provider_reference;
 
-  const { error } = await supabase
-    .from("fulfillment_requests")
-    .update({
-      provider_reference:
-        primaryReference ?? null,
-      status,
-      response_data:
-        rawResponse &&
-        typeof rawResponse === "object"
-          ? (rawResponse as Record<string, unknown>)
-          : { rawResponse },
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", fulfillmentRequest.id);
+  const { error } =
+    await supabase
+      .from("fulfillment_requests")
+      .update({
+        provider_reference:
+          primaryReference ?? null,
+        status,
+        response_data: responseData,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "id",
+        fulfillmentRequest.id,
+      );
 
   if (error) {
     throw new Error(
@@ -381,37 +514,32 @@ async function persistSubmission(
     return;
   }
 
-  const providerOrders = providerReferences.map(
-    (providerReference) => ({
-      fulfillment_request_id:
-        fulfillmentRequest.id,
-      provider: fulfillmentRequest.provider,
-      provider_reference: providerReference,
-      status,
-      response_data:
-        rawResponse &&
-        typeof rawResponse === "object"
-          ? (rawResponse as Record<string, unknown>)
-          : { rawResponse },
-    }),
-  );
+  for (const providerReference of providerReferences) {
+    const { error: providerOrderError } =
+      await supabase
+        .from(
+          "fulfillment_provider_orders",
+        )
+        .insert({
+          fulfillment_request_id:
+            fulfillmentRequest.id,
+          provider:
+            fulfillmentRequest.provider,
+          provider_reference:
+            providerReference,
+          status,
+          response_data:
+            responseData,
+        });
 
-  const { error: providerOrderError } =
-    await supabase
-      .from("fulfillment_provider_orders")
-      .upsert(
-        providerOrders,
-        {
-          onConflict:
-            "provider,provider_reference",
-          ignoreDuplicates: true,
-        },
+    if (
+      providerOrderError &&
+      providerOrderError.code !== "23505"
+    ) {
+      throw new Error(
+        "Unable to persist provider order references.",
       );
-
-  if (providerOrderError) {
-    throw new Error(
-      "Unable to persist provider order references.",
-    );
+    }
   }
 }
 
@@ -424,17 +552,21 @@ export async function submitFulfillment(
   }
 
   if (!providerName) {
-    throw new Error("Fulfillment provider is required.");
+    throw new Error(
+      "Fulfillment provider is required.",
+    );
   }
 
   const supabase = createAdminClient();
 
-  const { data: items, error: itemsError } =
-    await supabase
-      .from("order_items")
-      .select("id")
-      .eq("order_id", orderId)
-      .order("created_at");
+  const {
+    data: items,
+    error: itemsError,
+  } = await supabase
+    .from("order_items")
+    .select("id")
+    .eq("order_id", orderId)
+    .order("created_at");
 
   if (itemsError || !items?.length) {
     throw new Error(
@@ -454,17 +586,20 @@ export async function submitFulfillment(
       itemRow.id,
     );
 
-    if (order.status !== "paid" &&
-        order.status !== "processing") {
+    if (
+      order.status !== "paid" &&
+      order.status !== "processing"
+    ) {
       throw new Error(
         `Order ${order.order_number} is not ready for fulfillment.`,
       );
     }
 
-    const mapping = await getProviderMapping(
-      item.product_id,
-      providerName,
-    );
+    const mapping =
+      await getProviderMapping(
+        item.product_id,
+        providerName,
+      );
 
     const gameSlug =
       mapping.products.games.slug;
@@ -472,18 +607,36 @@ export async function submitFulfillment(
     const rawFulfillmentData =
       fulfillmentData.data ?? {};
 
-    const playerIdentifiers = Object.entries(
-      toStringRecord(rawFulfillmentData),
-    )
-      .filter(
-        ([key, value]) =>
-          key.trim().length > 0 &&
-          value.trim().length > 0,
+    const stringFulfillmentData =
+      toStringRecord(
+        rawFulfillmentData,
+      );
+
+    const providerFields =
+      parseProviderFields(
+        mapping.fulfillment_fields,
+      );
+
+    validateProviderFulfillmentData(
+      providerFields,
+      stringFulfillmentData,
+    );
+
+    const playerIdentifiers =
+      Object.entries(
+        stringFulfillmentData,
       )
-      .map(([key, value]) => ({
-        key,
-        value,
-      }));
+        .filter(
+          ([key, value]) =>
+            key.trim().length > 0 &&
+            value.trim().length > 0,
+        )
+        .map(
+          ([key, value]) => ({
+            key,
+            value,
+          }),
+        );
 
     const idempotencyKey =
       `fulfillment:${item.id}:${providerName}`;
@@ -528,8 +681,12 @@ export async function submitFulfillment(
     ) {
       const { data: children } =
         await supabase
-          .from("fulfillment_provider_orders")
-          .select("provider_reference")
+          .from(
+            "fulfillment_provider_orders",
+          )
+          .select(
+            "provider_reference",
+          )
           .eq(
             "fulfillment_request_id",
             fulfillmentRequest.id,
@@ -549,49 +706,122 @@ export async function submitFulfillment(
       continue;
     }
 
-    /*
-     * If another worker already claimed this request,
-     * it owns the external call. Do not submit again.
-     */
     if (
       fulfillmentRequest.status ===
       "processing"
     ) {
-      const { data: children } =
-        await supabase
-          .from("fulfillment_provider_orders")
-          .select("provider_reference")
-          .eq(
-            "fulfillment_request_id",
+      const recovery =
+        await recoverStaleProcessingRequest(
+          fulfillmentRequest,
+        );
+
+      if (
+        !recovery.shouldSubmit
+      ) {
+        results.push({
+          fulfillmentRequestId:
             fulfillmentRequest.id,
-          );
+          status: "processing",
+          providerReferences:
+            recovery.providerReferences,
+        });
 
-      results.push({
-        fulfillmentRequestId:
-          fulfillmentRequest.id,
-        status: "processing",
-        providerReferences:
-          children?.map(
-            (child) =>
-              child.provider_reference,
-          ) ?? [],
-      });
+        continue;
+      }
 
-      continue;
+      /*
+       * There is no provider reference, so the request
+       * may have died before or during the provider call.
+       *
+       * Move it back to queued. The deterministic external
+       * idempotency key makes the next provider call safe.
+       */
+      const { data: requeued, error } =
+        await supabase
+          .from("fulfillment_requests")
+          .update({
+            status: "queued",
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq(
+            "id",
+            fulfillmentRequest.id,
+          )
+          .eq("status", "processing")
+          .is(
+            "provider_reference",
+            null,
+          )
+          .select("id")
+          .maybeSingle();
+
+      if (error) {
+        throw new Error(
+          "Unable to recover fulfillment request.",
+        );
+      }
+
+      if (!requeued) {
+        results.push({
+          fulfillmentRequestId:
+            fulfillmentRequest.id,
+          status: "processing",
+          providerReferences: [],
+        });
+
+        continue;
+      }
     }
+
+    const claimableRequest =
+      await getOrCreateFulfillmentRequest(
+        order,
+        item,
+        providerName,
+        request as unknown as Record<
+          string,
+          unknown
+        >,
+      );
 
     const claimed =
       await claimFulfillmentRequest(
-        fulfillmentRequest.id,
-        fulfillmentRequest.attempt,
+        claimableRequest.id,
+        claimableRequest.attempt,
       );
 
     if (!claimed) {
+      const { data: current } =
+        await supabase
+          .from(
+            "fulfillment_requests",
+          )
+          .select(
+            "status, provider_reference",
+          )
+          .eq(
+            "id",
+            claimableRequest.id,
+          )
+          .single();
+
+      const currentStatus =
+        current &&
+        isFulfillmentStatus(
+          current.status,
+        )
+          ? current.status
+          : "processing";
+
       results.push({
         fulfillmentRequestId:
-          fulfillmentRequest.id,
-        status: "processing",
-        providerReferences: [],
+          claimableRequest.id,
+        status: currentStatus,
+        providerReferences:
+          current?.provider_reference
+            ? [current.provider_reference]
+            : [],
       });
 
       continue;
@@ -600,21 +830,47 @@ export async function submitFulfillment(
     const provider =
       getProvider(providerName);
 
-    /*
-     * IMPORTANT:
-     *
-     * The fulfillment request and its idempotency key
-     * already exist in our DB before this call.
-     *
-     * If the network dies after GameCore accepts the order,
-     * a later retry uses the same key rather than creating
-     * a new provider intent.
-     */
-    const submission =
-      await provider.submit(request);
+    let submission;
+
+    try {
+      submission =
+        await provider.submit(
+          request,
+        );
+    } catch (error) {
+      /*
+       * Never mark an uncertain external submission as failed.
+       *
+       * The provider may have accepted the request and the
+       * response may simply have been lost. Requeueing lets the
+       * deterministic idempotency key safely recover it.
+       */
+      await supabase
+        .from(
+          "fulfillment_requests",
+        )
+        .update({
+          status: "queued",
+          response_data: {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Provider submission failed.",
+          },
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          claimableRequest.id,
+        )
+        .eq("status", "processing");
+
+      throw error;
+    }
 
     await persistSubmission(
-      fulfillmentRequest,
+      claimableRequest,
       submission.providerReferences,
       submission.status,
       submission.rawResponse,
@@ -622,26 +878,31 @@ export async function submitFulfillment(
 
     results.push({
       fulfillmentRequestId:
-        fulfillmentRequest.id,
+        claimableRequest.id,
       status: submission.status,
       providerReferences:
         submission.providerReferences,
     });
   }
 
-  const hasFailure = results.some(
-    (result) => result.status === "failed",
-  );
+  const hasFailure =
+    results.some(
+      (result) =>
+        result.status === "failed",
+    );
 
-  const hasProcessing = results.some(
-    (result) =>
-      result.status === "processing" ||
-      result.status === "pending",
+  const hasProcessing =
+    results.some(
+      (result) =>
+        result.status ===
+          "processing" ||
+        result.status === "pending",
   );
 
   return {
     fulfillmentRequestId:
-      results[0]?.fulfillmentRequestId ?? "",
+      results[0]
+        ?.fulfillmentRequestId ?? "",
     status: hasFailure
       ? "failed"
       : hasProcessing
@@ -649,7 +910,8 @@ export async function submitFulfillment(
         : "successful",
     providerReferences:
       results.flatMap(
-        (result) => result.providerReferences,
+        (result) =>
+          result.providerReferences,
       ),
   };
 }
