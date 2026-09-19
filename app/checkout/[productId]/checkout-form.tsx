@@ -5,27 +5,6 @@ import { useActionState } from "react";
 import type { FulfillmentConfig } from "@/lib/fulfillment/config";
 import { submitOrder } from "@/app/actions/orders";
 
-type State = {
-  error?: string;
-} | null;
-
-async function action(
-  _previousState: State,
-  formData: FormData,
-): Promise<State> {
-  try {
-    await submitOrder(formData);
-    return null;
-  } catch (error) {
-    return {
-      error:
-        error instanceof Error
-          ? error.message
-          : "Unable to create order.",
-    };
-  }
-}
-
 export function CheckoutForm({
   productId,
   config,
@@ -34,7 +13,7 @@ export function CheckoutForm({
   config: FulfillmentConfig;
 }) {
   const [state, formAction, pending] = useActionState(
-    action,
+    submitOrder,
     null,
   );
 
