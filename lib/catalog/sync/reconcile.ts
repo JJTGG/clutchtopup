@@ -25,7 +25,47 @@ function isValidProduct(product: ProviderProduct) {
     product.currency.trim().length > 0 &&
     Number.isFinite(product.cost) &&
     product.cost >= 0 &&
+    typeof product.available === "boolean" &&
     Array.isArray(product.fulfillmentFields)
+  );
+}
+
+function hasIdentityChange(
+  product: ProviderProduct,
+  previous: CatalogProductSnapshot,
+) {
+  const reasons: string[] = [];
+
+  if (previous.gameSlug !== product.gameSlug) {
+    reasons.push("Game mapping changed.");
+  }
+
+  if (previous.region !== product.region) {
+    reasons.push("Region changed.");
+  }
+
+  if (previous.currency !== product.currency) {
+    reasons.push("Currency changed.");
+  }
+
+  if (
+    JSON.stringify(previous.fulfillmentFields) !==
+    JSON.stringify(product.fulfillmentFields)
+  ) {
+    reasons.push("Fulfillment requirements changed.");
+  }
+
+  return reasons;
+}
+
+function hasSafeChange(
+  product: ProviderProduct,
+  previous: CatalogProductSnapshot,
+) {
+  return (
+    previous.name !== product.name ||
+    previous.cost !== product.cost ||
+    previous.available !== product.available
   );
 }
 
@@ -35,6 +75,18 @@ export function reconcileCatalog(
 ): CatalogSyncResult {
   const decisions: CatalogSyncResult["decisions"] = [];
   const rejected: CatalogSyncResult["rejected"] = [];
+
+  if (incoming.length === 0) {
+    return {
+      aborted: true,
+      decisions: [],
+      rejected: [
+        {
+          reason: "Provider catalog response is empty.",
+        },
+      ],
+    };
+  }
 
   const existingMap = new Map(
     existing.map((product) => [
@@ -88,30 +140,44 @@ export function reconcileCatalog(
       continue;
     }
 
-    const changed =
-      previous.gameSlug !== product.gameSlug ||
-      previous.name !== product.name ||
-      previous.region !== product.region ||
-      previous.currency !== product.currency ||
-      previous.cost !== product.cost ||
-      previous.available !== product.available ||
-      JSON.stringify(previous.fulfillmentFields) !==
-        JSON.stringify(product.fulfillmentFields);
+    const identityChangeReasons = hasIdentityChange(
+      product,
+      previous,
+    );
 
-    if (!changed) {
+    if (identityChangeReasons.length > 0) {
       decisions.push({
-        type: "unchanged",
+        type: "review",
         product,
+        previous,
+        reasons: identityChangeReasons,
+      });
+
+      continue;
+    }
+
+    if (hasSafeChange(product, previous)) {
+      decisions.push({
+        type: "update",
+        product,
+        previous,
       });
 
       continue;
     }
 
     decisions.push({
-      type: "update",
+      type: "unchanged",
       product,
-      previous,
     });
+  }
+
+  if (rejected.length > 0) {
+    return {
+      aborted: true,
+      decisions: [],
+      rejected,
+    };
   }
 
   for (const previous of existing) {
@@ -129,6 +195,7 @@ export function reconcileCatalog(
   }
 
   return {
+    aborted: false,
     decisions,
     rejected,
   };
