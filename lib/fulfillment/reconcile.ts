@@ -33,7 +33,7 @@ type ProviderItem = {
 
 function isTerminal(
   status: FulfillmentStatus,
-): boolean {
+): status is "successful" | "failed" {
   return (
     status === "successful" ||
     status === "failed"
