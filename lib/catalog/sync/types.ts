@@ -1,5 +1,10 @@
 import type { ProviderProduct } from "@/lib/fulfillment/types";
 
+export type ProviderCatalog = {
+  complete: boolean;
+  products: ProviderProduct[];
+};
+
 export type CatalogProductSnapshot = {
   provider: string;
   providerProductId: string;
