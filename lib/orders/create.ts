@@ -1,4 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
+import {
+  parseFulfillmentConfig,
+} from "@/lib/fulfillment/config";
+import {
+  validateFulfillmentData,
+} from "@/lib/fulfillment/validate";
 import type {
   CreateOrderInput,
   CreateOrderResult,
@@ -29,15 +35,48 @@ export async function createOrder(
     throw new Error("Idempotency key is required.");
   }
 
-  const { data, error } = await supabase.rpc("create_order_atomic", {
-    p_product_id: input.productId,
-    p_quantity: input.quantity,
-    p_fulfillment_data: input.fulfillmentData,
-    p_idempotency_key: input.idempotencyKey,
-  });
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select(`
+      id,
+      is_active,
+      fulfillment_config,
+      games!inner (
+        is_active
+      )
+    `)
+    .eq("id", input.productId)
+    .eq("is_active", true)
+    .eq("games.is_active", true)
+    .single();
+
+  if (productError || !product) {
+    throw new Error("Product is unavailable.");
+  }
+
+  const config = parseFulfillmentConfig(
+    product.fulfillment_config,
+  );
+
+  validateFulfillmentData(
+    config,
+    input.fulfillmentData,
+  );
+
+  const { data, error } = await supabase.rpc(
+    "create_order_atomic",
+    {
+      p_product_id: input.productId,
+      p_quantity: input.quantity,
+      p_fulfillment_data: input.fulfillmentData,
+      p_idempotency_key: input.idempotencyKey,
+    },
+  );
 
   if (error || !data?.[0]) {
-    throw new Error(error?.message ?? "Unable to create order.");
+    throw new Error(
+      error?.message ?? "Unable to create order.",
+    );
   }
 
   return {
