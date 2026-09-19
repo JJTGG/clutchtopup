@@ -99,3 +99,33 @@ textarea {
 .error {
   color: #ff8a8a;
 }
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 32px;
+}
+
+.catalog-card {
+  display: block;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #0b0b0b;
+}
+
+.catalog-card h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.catalog-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.catalog-card strong {
+  display: block;
+  margin-top: 18px;
+}
