@@ -1,0 +1,50 @@
+import { createClient } from "@/lib/supabase/server";
+import type {
+  CreateOrderInput,
+  CreateOrderResult,
+} from "@/lib/orders/types";
+
+export async function createOrder(
+  input: CreateOrderInput,
+): Promise<CreateOrderResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Authentication required.");
+  }
+
+  if (!input.productId) {
+    throw new Error("Product is required.");
+  }
+
+  if (!Number.isInteger(input.quantity) || input.quantity < 1) {
+    throw new Error("Invalid quantity.");
+  }
+
+  if (!input.idempotencyKey) {
+    throw new Error("Idempotency key is required.");
+  }
+
+  const { data, error } = await supabase.rpc("create_order_atomic", {
+    p_product_id: input.productId,
+    p_quantity: input.quantity,
+    p_fulfillment_data: input.fulfillmentData,
+    p_idempotency_key: input.idempotencyKey,
+  });
+
+  if (error || !data?.[0]) {
+    throw new Error(error?.message ?? "Unable to create order.");
+  }
+
+  return {
+    orderId: data[0].order_id,
+    orderNumber: data[0].order_number,
+    status: data[0].order_status,
+    total: Number(data[0].total),
+    currency: data[0].currency,
+  };
+}
