@@ -1,6 +1,27 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getPaymentProvider } from "@/lib/payments/providers";
 import type { PaymentInitialization } from "@/lib/payments/types";
+
+const PAYMENT_STATUSES = [
+  "pending",
+  "confirmed",
+  "failed",
+  "abandoned",
+  "reversed",
+  "refunded",
+] as const;
+
+function isPaymentStatus(
+  value: unknown,
+): value is PaymentInitialization["status"] {
+  return (
+    typeof value === "string" &&
+    PAYMENT_STATUSES.includes(
+      value as (typeof PAYMENT_STATUSES)[number],
+    )
+  );
+}
 
 export async function initializePayment(
   orderId: string,
@@ -46,12 +67,14 @@ export async function initializePayment(
 
   const internalPayment = payment[0];
 
-  // If this payment was already initialized with the provider,
-  // return the existing result instead of creating another one.
   if (
     internalPayment.provider_reference &&
     internalPayment.checkout_url
   ) {
+    if (!isPaymentStatus(internalPayment.payment_status)) {
+      throw new Error("Invalid payment status.");
+    }
+
     return {
       providerReference: internalPayment.provider_reference,
       checkoutUrl: internalPayment.checkout_url,
@@ -76,18 +99,13 @@ export async function initializePayment(
 
   try {
     providerResult = await provider.initialize({
-      orderId: internalPayment.payment_id
-        ? order.id
-        : orderId,
+      orderId,
       orderNumber: order.order_number,
       amount: Number(internalPayment.amount),
       currency: internalPayment.currency,
       idempotencyKey,
     });
   } catch {
-    // The internal payment intentionally remains pending.
-    // A provider timeout/error is recoverable and must not
-    // be treated as a confirmed payment failure.
     throw new Error(
       "Payment provider is temporarily unavailable.",
     );
@@ -102,16 +120,10 @@ export async function initializePayment(
     );
   }
 
-  if (
-    providerResult.status !== "pending"
-  ) {
-    throw new Error(
-      "Payment provider returned an invalid initialization status.",
-    );
-  }
+  const admin = createAdminClient();
 
   const { data: finalized, error: finalizeError } =
-    await supabase.rpc(
+    await admin.rpc(
       "finalize_payment_initialization",
       {
         p_payment_id: internalPayment.payment_id,
@@ -125,6 +137,10 @@ export async function initializePayment(
     throw new Error(
       "Unable to save payment initialization.",
     );
+  }
+
+  if (!isPaymentStatus(finalized[0].payment_status)) {
+    throw new Error("Invalid payment status.");
   }
 
   return {
