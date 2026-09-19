@@ -104,6 +104,7 @@ export async function initializePayment(
       amount: Number(internalPayment.amount),
       currency: internalPayment.currency,
       idempotencyKey,
+      customerEmail: user.email ?? undefined,
     });
   } catch {
     throw new Error(
