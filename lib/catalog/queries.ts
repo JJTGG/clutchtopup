@@ -10,6 +10,7 @@ export async function getActiveGames() {
     .order("name");
 
   if (error) {
+    console.error("getActiveGames failed:", error);
     throw new Error("Unable to load games.");
   }
 
@@ -48,7 +49,7 @@ export async function getGameBySlug(slug: string) {
   return data;
 }
 
- export async function getProductById(productId: string) {
+export async function getProductById(productId: string) {
   const supabase = await createClient();
 
   const { data, error } = await supabase
