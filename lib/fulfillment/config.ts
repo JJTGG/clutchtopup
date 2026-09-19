@@ -30,32 +30,34 @@ export function parseFulfillmentConfig(
     throw new Error("Invalid region configuration.");
   }
 
-  const fields = config.fields.map((field) => {
-    if (!field || typeof field !== "object") {
-      throw new Error("Invalid fulfillment field.");
-    }
+  const fields: FulfillmentField[] = config.fields.map(
+    (field): FulfillmentField => {
+      if (!field || typeof field !== "object") {
+        throw new Error("Invalid fulfillment field.");
+      }
 
-    const item = field as Record<string, unknown>;
+      const item = field as Record<string, unknown>;
 
-    if (
-      typeof item.key !== "string" ||
-      typeof item.label !== "string" ||
-      (item.type !== "text" && item.type !== "number") ||
-      typeof item.required !== "boolean"
-    ) {
-      throw new Error("Invalid fulfillment field.");
-    }
+      if (
+        typeof item.key !== "string" ||
+        typeof item.label !== "string" ||
+        (item.type !== "text" && item.type !== "number") ||
+        typeof item.required !== "boolean"
+      ) {
+        throw new Error("Invalid fulfillment field.");
+      }
 
-    return {
-      key: item.key,
-      label: item.label,
-      type: item.type,
-      required: item.required,
-      ...(typeof item.placeholder === "string"
-        ? { placeholder: item.placeholder }
-        : {}),
-    };
-  });
+      return {
+        key: item.key,
+        label: item.label,
+        type: item.type,
+        required: item.required,
+        ...(typeof item.placeholder === "string"
+          ? { placeholder: item.placeholder }
+          : {}),
+      };
+    },
+  );
 
   return {
     fields,
