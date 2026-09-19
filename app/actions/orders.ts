@@ -3,7 +3,14 @@
 import { redirect } from "next/navigation";
 import { createOrder } from "@/lib/orders/create";
 
-export async function submitOrder(formData: FormData) {
+export type SubmitOrderState = {
+  error?: string;
+} | null;
+
+export async function submitOrder(
+  _previousState: SubmitOrderState,
+  formData: FormData,
+): Promise<SubmitOrderState> {
   const productId = String(formData.get("productId") ?? "");
   const quantity = Number(formData.get("quantity") ?? 1);
   const idempotencyKey = String(
@@ -22,12 +29,23 @@ export async function submitOrder(formData: FormData) {
     }
   }
 
-  const result = await createOrder({
-    productId,
-    quantity,
-    fulfillmentData,
-    idempotencyKey,
-  });
+  let result;
+
+  try {
+    result = await createOrder({
+      productId,
+      quantity,
+      fulfillmentData,
+      idempotencyKey,
+    });
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unable to create order.",
+    };
+  }
 
   redirect(`/orders/${result.orderNumber}`);
 }
