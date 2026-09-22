@@ -1,4 +1,7 @@
 import { notFound } from "next/navigation";
+
+import PayButton from "./pay-button";
+
 import { createClient } from "@/lib/supabase/server";
 
 export default async function OrderPage({
@@ -45,9 +48,11 @@ export default async function OrderPage({
     notFound();
   }
 
+  const canPay = order.status === "pending";
+
   return (
     <main>
-      <h1>Order Created</h1>
+      <h1>Order</h1>
 
       <p>
         Order: <strong>{order.order_number}</strong>
@@ -61,9 +66,11 @@ export default async function OrderPage({
         {order.order_items.map((item) => (
           <div key={item.id}>
             <h2>{item.product_name}</h2>
+
             <p>
               Quantity: {item.quantity}
             </p>
+
             <p>
               {order.currency} {item.subtotal}
             </p>
@@ -78,10 +85,19 @@ export default async function OrderPage({
         </strong>
       </p>
 
-      <p>
-        Your order has been created and is awaiting
-        payment.
-      </p>
+      {canPay ? (
+        <>
+          <p>
+            Your order is ready for payment.
+          </p>
+
+          <PayButton orderId={order.id} />
+        </>
+      ) : (
+        <p>
+          This order is no longer awaiting payment.
+        </p>
+      )}
     </main>
   );
 }
