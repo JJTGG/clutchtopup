@@ -106,11 +106,11 @@ export async function createProduct(input: {
 }) {
   const supabase = await createClient();
 
-  const validated = validateProductInput(input);
-
   if (!input.gameId) {
     throw new Error("Game is required.");
   }
+
+  const validated = validateProductInput(input);
 
   const { data: game, error: gameError } = await supabase
     .from("games")
@@ -123,7 +123,9 @@ export async function createProduct(input: {
   }
 
   if (!game.is_active) {
-    throw new Error("Products can only be created for active games.");
+    throw new Error(
+      "Products can only be created for active games.",
+    );
   }
 
   const { data, error } = await supabase
@@ -212,12 +214,31 @@ export async function getAdminProducts() {
     throw new Error("Unable to load products.");
   }
 
-  const productIds = products.map(
+  const normalizedProducts = products.map((product) => {
+    const rawGame = product.games;
+    const game = Array.isArray(rawGame)
+      ? rawGame[0] ?? null
+      : rawGame;
+
+    return {
+      id: product.id,
+      name: product.name,
+      slug: product.slug,
+      description: product.description,
+      price: product.price,
+      currency: product.currency,
+      is_active: product.is_active,
+      fulfillment_config: product.fulfillment_config,
+      game,
+    };
+  });
+
+  const productIds = normalizedProducts.map(
     (product) => product.id,
   );
 
   if (!productIds.length) {
-    return products.map((product) => ({
+    return normalizedProducts.map((product) => ({
       ...product,
       mappings: [],
       availableMappingCount: 0,
@@ -247,12 +268,29 @@ export async function getAdminProducts() {
     throw new Error("Unable to load product mappings.");
   }
 
-  return products.map((product) => {
-    const productMappings =
-      mappings.filter(
+  return normalizedProducts.map((product) => {
+    const productMappings = mappings
+      .filter(
         (mapping) =>
           mapping.product_id === product.id,
-      );
+      )
+      .map((mapping) => {
+        const rawProvider =
+          mapping.catalog_providers;
+
+        const provider = Array.isArray(rawProvider)
+          ? rawProvider[0] ?? null
+          : rawProvider;
+
+        return {
+          id: mapping.id,
+          product_id: mapping.product_id,
+          available: mapping.available,
+          provider_product_id:
+            mapping.provider_product_id,
+          catalog_providers: provider,
+        };
+      });
 
     return {
       ...product,
