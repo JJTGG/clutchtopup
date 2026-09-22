@@ -12,10 +12,11 @@ export default function PayButton({
 }: {
   orderId: string;
 }) {
-  const [state, formAction, pending] = useActionState<
-    InitializePaymentState,
-    FormData
-  >(startPayment, null);
+  const [state, formAction, pending] =
+    useActionState(
+      startPayment,
+      null,
+    );
 
   const [idempotencyKey] = useState(() =>
     crypto.randomUUID(),
@@ -39,11 +40,15 @@ export default function PayButton({
         type="submit"
         disabled={pending}
       >
-        {pending ? "Preparing payment..." : "Pay now"}
+        {pending
+          ? "Preparing payment..."
+          : "Pay now"}
       </button>
 
       {state?.error && (
-        <p role="alert">{state.error}</p>
+        <p role="alert">
+          {state.error}
+        </p>
       )}
     </form>
   );
