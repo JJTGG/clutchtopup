@@ -19,5 +19,6 @@ export interface PaymentProvider {
   parseWebhook(
     payload: unknown,
     signature?: string,
+    rawBody?: string,
   ): Promise<PaymentWebhook>;
 }
