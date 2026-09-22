@@ -41,11 +41,10 @@ export default async function AdminProductsPage({
 
   const params = await searchParams;
 
-  const [options, products] =
-    await Promise.all([
-      getAdminCatalogOptions(),
-      getAdminProducts(),
-    ]);
+  const [options, products] = await Promise.all([
+    getAdminCatalogOptions(),
+    getAdminProducts(),
+  ]);
 
   return (
     <main className="admin-shell">
@@ -220,7 +219,8 @@ export default async function AdminProductsPage({
                   <p>
                     Game:{" "}
                     <strong>
-                      {product.games.name}
+                      {product.game?.name ??
+                        "Unknown game"}
                     </strong>
                   </p>
 
