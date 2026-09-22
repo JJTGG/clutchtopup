@@ -1,5 +1,7 @@
 "use server";
 
+import { redirect } from "next/navigation";
+
 import { initializePayment } from "@/lib/payments/initialize";
 
 export type InitializePaymentState = {
@@ -30,22 +32,14 @@ export async function startPayment(
     };
   }
 
+  let payment;
+
   try {
-    const payment = await initializePayment(
+    payment = await initializePayment(
       orderId,
       "monnify",
       idempotencyKey,
     );
-
-    if (!payment.checkoutUrl) {
-      return {
-        error: "Payment checkout is unavailable.",
-      };
-    }
-
-    const { redirect } = await import("next/navigation");
-
-    redirect(payment.checkoutUrl);
   } catch (error) {
     return {
       error:
@@ -54,4 +48,12 @@ export async function startPayment(
           : "Unable to start payment.",
     };
   }
+
+  if (!payment.checkoutUrl) {
+    return {
+      error: "Payment checkout is unavailable.",
+    };
+  }
+
+  redirect(payment.checkoutUrl);
 }
