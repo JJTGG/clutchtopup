@@ -1,7 +1,10 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getProvider, listProviders } from "@/lib/fulfillment/providers";
+import {
+  getProvider,
+  listProviders,
+} from "@/lib/fulfillment/providers";
 import { applyCatalogSync } from "@/lib/catalog/sync/apply";
 import { reconcileCatalog } from "@/lib/catalog/sync/reconcile";
 import type {
@@ -17,35 +20,44 @@ export async function getAdminCatalogOptions() {
 
   const supabase = createAdminClient();
 
-  const [{ data: games, error: gamesError }, { data: providers, error: providersError }] =
-    await Promise.all([
-      supabase
-        .from("games")
-        .select("id, name, slug, description")
-        .eq("is_active", true)
-        .order("name"),
+  const [
+    { data: games, error: gamesError },
+    {
+      data: providers,
+      error: providersError,
+    },
+  ] = await Promise.all([
+    supabase
+      .from("games")
+      .select("id, name, slug, description")
+      .eq("is_active", true)
+      .order("name"),
 
-      supabase
-        .from("catalog_providers")
-        .select("id, slug, name, is_active")
-        .eq("is_active", true)
-        .order("name"),
-    ]);
+    supabase
+      .from("catalog_providers")
+      .select("id, slug, name, is_active")
+      .eq("is_active", true)
+      .order("name"),
+  ]);
 
   if (gamesError) {
     throw new Error("Unable to load games.");
   }
 
   if (providersError) {
-    throw new Error("Unable to load catalog providers.");
+    throw new Error(
+      "Unable to load catalog providers.",
+    );
   }
 
   return {
     games: games ?? [],
     providers: providers ?? [],
-    registeredProviders: listProviders().map((provider) => ({
-      name: provider.name,
-    })),
+    registeredProviders: listProviders().map(
+      (provider) => ({
+        name: provider.name,
+      }),
+    ),
   };
 }
 
@@ -75,16 +87,30 @@ async function getExistingSnapshots(
         )
       )
     `)
-    .eq("catalog_providers.slug", providerName)
-    .eq("products.games.slug", gameSlug);
+    .eq(
+      "catalog_providers.slug",
+      providerName,
+    )
+    .eq(
+      "products.games.slug",
+      gameSlug,
+    );
 
   if (error) {
-    console.error("getExistingSnapshots failed:", error);
-    throw new Error("Unable to load existing catalog mappings.");
+    console.error(
+      "getExistingSnapshots failed:",
+      error,
+    );
+
+    throw new Error(
+      "Unable to load existing catalog mappings.",
+    );
   }
 
   return (data ?? []).map((row) => {
-    const provider = Array.isArray(row.catalog_providers)
+    const provider = Array.isArray(
+      row.catalog_providers,
+    )
       ? row.catalog_providers[0]
       : row.catalog_providers;
 
@@ -100,17 +126,29 @@ async function getExistingSnapshots(
 
     return {
       productId: row.product_id,
-      provider: provider?.slug ?? providerName,
-      providerProductId: row.provider_product_id,
-      gameSlug: game?.slug ?? gameSlug,
-      name: product?.name ?? "Unknown product",
-      region: row.region ?? undefined,
+      provider:
+        provider?.slug ?? providerName,
+      providerProductId:
+        row.provider_product_id,
+      gameSlug:
+        game?.slug ?? gameSlug,
+      name:
+        product?.name ??
+        "Unknown product",
+      region:
+        row.region ?? undefined,
       currency: row.currency,
-      cost: Number(row.provider_cost),
-      available: row.available,
-      fulfillmentFields: Array.isArray(row.fulfillment_fields)
-        ? row.fulfillment_fields
-        : [],
+      cost: Number(
+        row.provider_cost,
+      ),
+      available:
+        row.available,
+      fulfillmentFields:
+        Array.isArray(
+          row.fulfillment_fields,
+        )
+          ? row.fulfillment_fields
+          : [],
     };
   });
 }
@@ -125,25 +163,31 @@ export async function previewCatalogSync(
 }> {
   await requireAdmin();
 
-  const provider = getProvider(providerName);
+  const provider =
+    getProvider(providerName);
 
-  const products = await provider.getProducts(gameSlug);
+  const products =
+    await provider.getProducts(
+      gameSlug,
+    );
 
   const catalog: ProviderCatalog = {
     complete: true,
     products,
   };
 
-  const existing = await getExistingSnapshots(
-    providerName,
-    gameSlug,
-  );
+  const existing =
+    await getExistingSnapshots(
+      providerName,
+      gameSlug,
+    );
 
-  const result = reconcileCatalog(
-    catalog,
-    existing,
-    matches,
-  );
+  const result =
+    reconcileCatalog(
+      catalog,
+      existing,
+      matches,
+    );
 
   return {
     catalog,
@@ -151,24 +195,57 @@ export async function previewCatalogSync(
   };
 }
 
-export async function getProductsForGame(gameSlug: string) {
+export async function getProductsForGame(
+  gameSlug: string,
+) {
   await requireAdmin();
 
-  const supabase = createAdminClient();
+  const supabase =
+    createAdminClient();
 
-  const { data, error } = await supabase
-    .from("products")
-    .select("id, name, slug, price, currency")
-    .eq("is_active", true)
-    .eq("games.slug", gameSlug)
-    .order("name");
+  const { data, error } =
+    await supabase
+      .from("products")
+      .select(`
+        id,
+        name,
+        slug,
+        price,
+        currency,
+        games!inner (
+          slug
+        )
+      `)
+      .eq(
+        "is_active",
+        true,
+      )
+      .eq(
+        "games.slug",
+        gameSlug,
+      )
+      .order("name");
 
   if (error) {
-    console.error("getProductsForGame failed:", error);
-    throw new Error("Unable to load ClutchTopUp products.");
+    console.error(
+      "getProductsForGame failed:",
+      error,
+    );
+
+    throw new Error(
+      "Unable to load ClutchTopUp products.",
+    );
   }
 
-  return data ?? [];
+  return (data ?? []).map(
+    (product) => ({
+      id: product.id,
+      name: product.name,
+      slug: product.slug,
+      price: product.price,
+      currency: product.currency,
+    }),
+  );
 }
 
 export async function applyAdminCatalogSync(
@@ -179,14 +256,17 @@ export async function applyAdminCatalogSync(
   await requireAdmin();
 
   /*
-   * Re-fetch the provider catalog and existing mappings here.
+   * Re-fetch the provider catalog and existing
+   * mappings here.
+   *
    * Never trust a decision object sent by the browser.
    */
-  const { result } = await previewCatalogSync(
-    providerName,
-    gameSlug,
-    matches,
-  );
+  const { result } =
+    await previewCatalogSync(
+      providerName,
+      gameSlug,
+      matches,
+    );
 
   if (result.aborted) {
     throw new Error(
@@ -195,9 +275,11 @@ export async function applyAdminCatalogSync(
     );
   }
 
-  const reviewCount = result.decisions.filter(
-    (decision) => decision.type === "review",
-  ).length;
+  const reviewCount =
+    result.decisions.filter(
+      (decision) =>
+        decision.type === "review",
+    ).length;
 
   if (reviewCount > 0) {
     throw new Error(
@@ -205,5 +287,7 @@ export async function applyAdminCatalogSync(
     );
   }
 
-  return applyCatalogSync(result.decisions);
+  return applyCatalogSync(
+    result.decisions,
+  );
 }
