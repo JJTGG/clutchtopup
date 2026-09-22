@@ -1,5 +1,7 @@
 import "server-only";
 
+import crypto from "node:crypto";
+
 import type { PaymentProvider } from "@/lib/payments/provider";
 import type {
   PaymentInitialization,
@@ -9,7 +11,8 @@ import type {
 } from "@/lib/payments/types";
 
 const BASE_URL =
-  process.env.MONNIFY_BASE_URL ?? "https://sandbox.monnify.com";
+  process.env.MONNIFY_BASE_URL ??
+  "https://sandbox.monnify.com";
 
 const API_KEY = process.env.MONNIFY_API_KEY;
 const SECRET_KEY = process.env.MONNIFY_SECRET_KEY;
@@ -72,7 +75,9 @@ async function getAccessToken() {
     !result.requestSuccessful ||
     !result.responseBody?.accessToken
   ) {
-    throw new Error("Unable to authenticate with Monnify.");
+    throw new Error(
+      "Unable to authenticate with Monnify.",
+    );
   }
 
   return result.responseBody.accessToken;
@@ -84,19 +89,26 @@ async function monnifyFetch<T>(
 ) {
   const token = await getAccessToken();
 
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
+  const response = await fetch(
+    `${BASE_URL}${path}`,
+    {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+      cache: "no-store",
     },
-    cache: "no-store",
-  });
+  );
 
-  const result = (await response.json()) as MonnifyResponse<T>;
+  const result =
+    (await response.json()) as MonnifyResponse<T>;
 
-  if (!response.ok || !result.requestSuccessful) {
+  if (
+    !response.ok ||
+    !result.requestSuccessful
+  ) {
     throw new Error(
       result.responseMessage ??
         "Monnify request failed.",
@@ -114,6 +126,7 @@ function normalizeStatus(
       return "confirmed";
 
     case "FAILED":
+    case "REJECTED":
       return "failed";
 
     case "PENDING":
@@ -122,6 +135,12 @@ function normalizeStatus(
     case "OVERPAID":
     case "PARTIALLY_PAID":
       return "pending";
+
+    case "REVERSED":
+      return "reversed";
+
+    case "EXPIRED":
+      return "abandoned";
 
     default:
       return "pending";
@@ -139,6 +158,48 @@ function createPaymentReference(
   return `CT-${orderNumber}-${suffix}`;
 }
 
+function isSandbox() {
+  return BASE_URL.includes(
+    "sandbox.monnify.com",
+  );
+}
+
+function verifyWebhookSignature(
+  rawBody: string,
+  signature: string,
+): boolean {
+  if (!SECRET_KEY) {
+    return false;
+  }
+
+  const expected = crypto
+    .createHmac("sha512", SECRET_KEY)
+    .update(rawBody)
+    .digest("hex");
+
+  const receivedBuffer = Buffer.from(
+    signature.trim(),
+    "utf8",
+  );
+
+  const expectedBuffer = Buffer.from(
+    expected,
+    "utf8",
+  );
+
+  if (
+    receivedBuffer.length !==
+    expectedBuffer.length
+  ) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    receivedBuffer,
+    expectedBuffer,
+  );
+}
+
 export const monnifyProvider: PaymentProvider = {
   name: "monnify",
 
@@ -151,36 +212,42 @@ export const monnifyProvider: PaymentProvider = {
       );
     }
 
-    const paymentReference = createPaymentReference(
-      request.orderNumber,
-      request.idempotencyKey,
-    );
+    const paymentReference =
+      createPaymentReference(
+        request.orderNumber,
+        request.idempotencyKey,
+      );
 
-    const transaction = await monnifyFetch<MonnifyTransaction>(
-      "/api/v1/merchant/transactions/init-transaction",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          amount: request.amount,
-          customerEmail: request.customerEmail,
-          paymentReference,
-          paymentDescription: `ClutchTopUp order ${request.orderNumber}`,
-          currencyCode: request.currency,
-          contractCode: CONTRACT_CODE,
-          redirectUrl: `${APP_URL}/orders/${request.orderNumber}`,
-          paymentMethods: [
-            "CARD",
-            "ACCOUNT_TRANSFER",
-            "USSD",
-            "PHONE_NUMBER",
-          ],
-          metadata: {
-            orderId: request.orderId,
-            orderNumber: request.orderNumber,
-          },
-        }),
-      },
-    );
+    const transaction =
+      await monnifyFetch<MonnifyTransaction>(
+        "/api/v1/merchant/transactions/init-transaction",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            amount: request.amount,
+            customerEmail:
+              request.customerEmail,
+            paymentReference,
+            paymentDescription:
+              `ClutchTopUp order ${request.orderNumber}`,
+            currencyCode: request.currency,
+            contractCode: CONTRACT_CODE,
+            redirectUrl:
+              `${APP_URL}/orders/${request.orderNumber}`,
+            paymentMethods: [
+              "CARD",
+              "ACCOUNT_TRANSFER",
+              "USSD",
+              "PHONE_NUMBER",
+            ],
+            metadata: {
+              orderId: request.orderId,
+              orderNumber:
+                request.orderNumber,
+            },
+          }),
+        },
+      );
 
     if (
       !transaction.transactionReference ||
@@ -192,8 +259,10 @@ export const monnifyProvider: PaymentProvider = {
     }
 
     return {
-      providerReference: transaction.transactionReference,
-      checkoutUrl: transaction.checkoutUrl,
+      providerReference:
+        transaction.transactionReference,
+      checkoutUrl:
+        transaction.checkoutUrl,
       status: "pending",
       rawResponse: transaction,
     };
@@ -219,12 +288,10 @@ export const monnifyProvider: PaymentProvider = {
         transaction.paymentStatus,
       ),
       amount: Number(
-        transaction.amountPaid ??
-          transaction.totalPayable ??
-          transaction.amount ??
-          0,
+        transaction.amountPaid ?? 0,
       ),
-      currency: transaction.currencyCode ?? "NGN",
+      currency:
+        transaction.currencyCode ?? "NGN",
       rawResponse: transaction,
     };
   },
@@ -232,42 +299,126 @@ export const monnifyProvider: PaymentProvider = {
   async parseWebhook(
     payload: unknown,
     signature?: string,
+    rawBody?: string,
   ): Promise<PaymentWebhook> {
-    if (!signature || !SECRET_KEY) {
+    if (
+      typeof rawBody !== "string"
+    ) {
+      throw new Error(
+        "Raw webhook body is required.",
+      );
+    }
+
+    /*
+     * Monnify does not include the signature
+     * on sandbox webhook notifications.
+     *
+     * Production must always provide and pass
+     * HMAC-SHA512 verification.
+     */
+    if (!signature) {
+      if (!isSandbox()) {
+        throw new Error(
+          "Invalid Monnify webhook signature.",
+        );
+      }
+    } else if (
+      !verifyWebhookSignature(
+        rawBody,
+        signature,
+      )
+    ) {
       throw new Error(
         "Invalid Monnify webhook signature.",
       );
     }
 
-    const data = payload as {
-      eventData?: {
-        transactionReference?: string;
-        paymentReference?: string;
-        amountPaid?: number;
-        totalPayable?: number;
-        currency?: string;
-        paymentStatus?: string;
-      };
-    };
-
-    const event = data.eventData;
-
-    if (!event?.transactionReference) {
+    if (
+      !payload ||
+      typeof payload !== "object"
+    ) {
       throw new Error(
         "Invalid Monnify webhook payload.",
       );
     }
 
+    const data =
+      payload as Record<
+        string,
+        unknown
+      >;
+
+    if (
+      data.eventType !==
+      "SUCCESSFUL_TRANSACTION"
+    ) {
+      throw new Error(
+        "Unsupported Monnify webhook event.",
+      );
+    }
+
+    const event =
+      data.eventData;
+
+    if (
+      !event ||
+      typeof event !== "object"
+    ) {
+      throw new Error(
+        "Invalid Monnify webhook payload.",
+      );
+    }
+
+    const eventData =
+      event as Record<
+        string,
+        unknown
+      >;
+
+    if (
+      typeof eventData.transactionReference !==
+      "string" ||
+      eventData.transactionReference.length ===
+        0
+    ) {
+      throw new Error(
+        "Invalid Monnify transaction reference.",
+      );
+    }
+
+    const status =
+      normalizeStatus(
+        typeof eventData.paymentStatus ===
+          "string"
+          ? eventData.paymentStatus
+          : undefined,
+      );
+
+    const amountPaid =
+      Number(
+        eventData.amountPaid ??
+          0,
+      );
+
+    if (
+      !Number.isFinite(amountPaid) ||
+      amountPaid <= 0
+    ) {
+      throw new Error(
+        "Invalid Monnify payment amount.",
+      );
+    }
+
     return {
       providerReference:
-        event.transactionReference,
-      status: normalizeStatus(
-        event.paymentStatus,
-      ),
-      amount:
-        event.amountPaid ??
-        event.totalPayable,
-      currency: event.currency,
+        eventData.transactionReference,
+      status,
+      amount: amountPaid,
+      currency:
+        typeof eventData.currency ===
+        "string"
+          ? eventData.currency
+          : undefined,
       rawPayload: payload,
     };
   },
