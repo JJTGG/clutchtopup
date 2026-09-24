@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 
 import PayButton from "./pay-button";
 
+export const dynamic = "force-dynamic";
+
 type PaymentStatus =
   | "pending"
   | "confirmed"
