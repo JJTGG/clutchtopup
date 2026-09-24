@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ClutchTopUp",
-  description: "Digital gaming top-up platform.",
+  description: "Fast digital gaming top-ups.",
 };
 
 export default function RootLayout({
