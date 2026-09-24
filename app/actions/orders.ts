@@ -1,6 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
+
+import { createClient } from "@/lib/supabase/server";
 import { createOrder } from "@/lib/orders/create";
 
 export type SubmitOrderState = {
@@ -11,8 +13,32 @@ export async function submitOrder(
   _previousState: SubmitOrderState,
   formData: FormData,
 ): Promise<SubmitOrderState> {
-  const productId = String(formData.get("productId") ?? "");
-  const quantity = Number(formData.get("quantity") ?? 1);
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    const { error } =
+      await supabase.auth.signInAnonymously();
+
+    if (error) {
+      return {
+        error:
+          "Unable to start checkout. Please try again.",
+      };
+    }
+  }
+
+  const productId = String(
+    formData.get("productId") ?? "",
+  );
+
+  const quantity = Number(
+    formData.get("quantity") ?? 1,
+  );
+
   const idempotencyKey = String(
     formData.get("idempotencyKey") ?? "",
   );
