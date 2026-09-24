@@ -642,27 +642,21 @@ export async function submitFulfillment(
       `fulfillment:${item.id}:${providerName}`;
 
     const request: FulfillmentRequest = {
-      providerProductId:
-        mapping.provider_product_id,
-      gameSlug,
-      region:
-        mapping.region ??
-        (typeof rawFulfillmentData.region ===
-        "string"
-          ? rawFulfillmentData.region
-          : undefined),
-      playerIdentifiers,
-      quantity: item.quantity,
-      idempotencyKey,
-      externalOrderId:
-        `${order.order_number}:${item.id}`,
-      ...(process.env.GAMECORE_WEBHOOK_URL
-        ? {
-            callbackUrl:
-              process.env.GAMECORE_WEBHOOK_URL,
-          }
-        : {}),
-    };
+  providerProductId:
+    mapping.provider_product_id,
+  gameSlug,
+  region:
+    mapping.region ??
+    (typeof rawFulfillmentData.region ===
+    "string"
+      ? rawFulfillmentData.region
+      : undefined),
+  playerIdentifiers,
+  quantity: item.quantity,
+  idempotencyKey,
+  externalOrderId:
+    `${order.order_number}:${item.id}`,
+};
 
     const fulfillmentRequest =
       await getOrCreateFulfillmentRequest(
