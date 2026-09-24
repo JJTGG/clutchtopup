@@ -1207,3 +1207,369 @@ button {
     width: 100%;
   }
 }
+
+  /* Order status */
+
+.order-page {
+  padding-bottom: 72px;
+}
+
+.order-heading {
+  max-width: 760px;
+  padding: 52px 0 40px;
+}
+
+.order-heading .back-link {
+  margin-top: 0;
+  margin-bottom: 34px;
+}
+
+.order-heading h1 {
+  margin: 12px 0 0;
+  font-size: clamp(3rem, 9vw, 5.5rem);
+  line-height: 0.92;
+  letter-spacing: -0.07em;
+}
+
+.order-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.order-main {
+  min-width: 0;
+}
+
+.order-status-card,
+.order-payment-card,
+.order-message,
+.order-summary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.order-status-card {
+  padding: 28px;
+}
+
+.order-status-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.order-status-card-heading h2 {
+  margin: 8px 0 0;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.order-status-indicator {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 5px rgba(242, 193, 78, 0.08);
+}
+
+.order-status-indicator.complete {
+  background: var(--success);
+  box-shadow: 0 0 0 5px rgba(99, 211, 145, 0.08);
+}
+
+.order-timeline {
+  display: grid;
+  gap: 0;
+  margin-top: 24px;
+}
+
+.order-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 96px;
+}
+
+.order-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 38px;
+  left: 18px;
+  width: 1px;
+  height: calc(100% - 8px);
+  background: var(--border);
+}
+
+.order-step-marker {
+  position: relative;
+  z-index: 1;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.order-step.complete .order-step-marker {
+  border-color: rgba(99, 211, 145, 0.4);
+  background: rgba(99, 211, 145, 0.08);
+  color: var(--success);
+}
+
+.order-step.active .order-step-marker {
+  border-color: rgba(183, 243, 74, 0.4);
+  background: rgba(183, 243, 74, 0.08);
+  color: var(--accent);
+}
+
+.order-step.failed .order-step-marker {
+  border-color: rgba(240, 106, 106, 0.4);
+  background: rgba(240, 106, 106, 0.08);
+  color: var(--danger);
+}
+
+.order-step > div:last-child {
+  padding-bottom: 26px;
+}
+
+.order-step-label {
+  margin: 2px 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.order-step strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.order-step span:not(.order-status-indicator) {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.order-payment-card {
+  margin-top: 14px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background: var(--surface-2);
+}
+
+.order-payment-card h2 {
+  margin: 8px 0 0;
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+
+.order-payment-card p:not(.eyebrow) {
+  max-width: 480px;
+  margin: 9px 0 0;
+  color: var(--secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.order-payment-card form {
+  flex: 0 0 auto;
+}
+
+.order-payment-card button {
+  min-height: 48px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--background);
+  font-weight: 800;
+}
+
+.order-payment-card button:hover,
+.order-payment-card button:focus-visible {
+  background: var(--accent-dark);
+}
+
+.order-payment-card button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.order-payment-card form p {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.order-message {
+  margin-top: 14px;
+  padding: 18px 20px;
+  display: grid;
+  gap: 5px;
+}
+
+.order-message strong {
+  font-size: 14px;
+}
+
+.order-message span {
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.order-message.error {
+  border-color: rgba(240, 106, 106, 0.35);
+  background: rgba(240, 106, 106, 0.05);
+}
+
+.order-message.error strong {
+  color: var(--danger);
+}
+
+.order-summary {
+  position: sticky;
+  top: 20px;
+  padding: 24px;
+}
+
+.order-summary-item {
+  padding: 20px 0;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.order-summary-item > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.order-summary-item strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.order-summary-item > strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.order-summary-item span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.order-summary-total {
+  padding: 20px 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.order-summary-total span {
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.order-summary-total strong {
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.order-summary-meta {
+  padding: 18px 0;
+  display: grid;
+  gap: 5px;
+}
+
+.order-summary-meta span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.order-summary-meta strong {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.order-secondary-action {
+  min-height: 44px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.order-secondary-action:hover,
+.order-secondary-action:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 800px) {
+  .order-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .order-summary {
+    position: static;
+    order: -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .order-heading {
+    padding-top: 40px;
+  }
+
+  .order-heading h1 {
+    font-size: clamp(3rem, 15vw, 5rem);
+  }
+
+  .order-status-card,
+  .order-payment-card,
+  .order-summary {
+    padding: 22px;
+  }
+
+  .order-payment-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .order-payment-card form button {
+    width: 100%;
+  }
+}
