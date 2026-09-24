@@ -1,109 +1,112 @@
 import Link from "next/link";
+import { GameCard } from "@/components/storefront/GameCard";
+import { SiteFooter } from "@/components/storefront/SiteFooter";
+import { SiteHeader } from "@/components/storefront/SiteHeader";
 import { getActiveGames } from "@/lib/catalog/queries";
 
 export default async function HomePage() {
   const games = await getActiveGames();
 
   return (
-    <main className="shell">
-      <header className="site-header">
-        <Link href="/" className="brand">
-          CLUTCHTOPUP
-        </Link>
+    <main>
+      <SiteHeader />
 
-        <nav className="site-nav">
-          <Link href="/games">Games</Link>
-          <Link href="/auth/login">Log in</Link>
-        </nav>
-      </header>
+      <div className="storefront-shell">
+        <section className="home-landing">
+          <div className="landing-copy">
+            <p className="eyebrow">GAME TOP-UPS</p>
 
-      <section className="hero home-hero">
-        <p className="eyebrow">DIGITAL GAMING TOP-UP</p>
+            <h1>
+              Choose your
+              <br />
+              game.
+            </h1>
 
-        <h1>Top up your game.<br />Get back in.</h1>
+            <p className="lead">
+              Pick a game, enter your Player ID, and get back in.
+            </p>
+          </div>
 
-        <p className="lead">
-          Fast, straightforward game top-ups with a simple order and
-          fulfillment process.
-        </p>
-
-        <div className="hero-actions">
           <Link href="/games" className="primary-action">
             Browse games
+            <span aria-hidden="true">→</span>
           </Link>
+        </section>
 
-          <Link href="/auth/signup" className="secondary-action">
-            Create account
-          </Link>
-        </div>
-      </section>
+        <section className="storefront-section" aria-labelledby="games-heading">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">AVAILABLE NOW</p>
+              <h2 id="games-heading">Choose your game.</h2>
+            </div>
 
-      <section className="home-games">
-        <div className="section-heading">
+            <Link href="/games" className="section-link">
+              View all →
+            </Link>
+          </div>
+
+          {games.length === 0 ? (
+            <div className="empty-state">
+              <p>No games are currently available.</p>
+            </div>
+          ) : (
+            <div className="game-grid">
+              {games.slice(0, 4).map((game) => (
+                <GameCard
+                  key={game.id}
+                  name={game.name}
+                  slug={game.slug}
+                  description={game.description}
+                  imageUrl={game.image_url}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="storefront-section" aria-labelledby="flow-heading">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">THE PROCESS</p>
+              <h2 id="flow-heading">Back in the game.</h2>
+            </div>
+          </div>
+
+          <div className="flow-grid">
+            <article className="flow-card">
+              <span>01</span>
+              <h3>Choose</h3>
+              <p>Select your game and top-up.</p>
+            </article>
+
+            <article className="flow-card">
+              <span>02</span>
+              <h3>Identify</h3>
+              <p>Enter the player information required.</p>
+            </article>
+
+            <article className="flow-card">
+              <span>03</span>
+              <h3>Pay</h3>
+              <p>Complete payment and let fulfillment run.</p>
+            </article>
+          </div>
+        </section>
+
+        <section className="track-prompt">
           <div>
-            <p className="eyebrow">AVAILABLE GAMES</p>
-            <h2>Choose your game.</h2>
+            <p className="eyebrow">ALREADY ORDERED?</p>
+            <h2>Check your order.</h2>
           </div>
 
-          <Link href="/games">View all</Link>
-        </div>
+          <p>
+            Order tracking is coming next. Your purchase flow will remain
+            accessible from your order confirmation.
+          </p>
+        </section>
 
-        {games.length === 0 ? (
-          <p className="lead">No games are currently available.</p>
-        ) : (
-          <div className="catalog-grid">
-            {games.slice(0, 5).map((game) => (
-              <Link
-                key={game.id}
-                href={`/products/${game.slug}`}
-                className="catalog-card"
-              >
-                <h3>{game.name}</h3>
-
-                {game.description && (
-                  <p>{game.description}</p>
-                )}
-
-                <span>View products →</span>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="home-flow">
-        <p className="eyebrow">HOW IT WORKS</p>
-
-        <div className="flow-grid">
-          <article>
-            <span>01</span>
-            <h3>Choose</h3>
-            <p>Select a game and the top-up you want.</p>
-          </article>
-
-          <article>
-            <span>02</span>
-            <h3>Order</h3>
-            <p>Enter the player information required for fulfillment.</p>
-          </article>
-
-          <article>
-            <span>03</span>
-            <h3>Top up</h3>
-            <p>Complete payment and let the fulfillment process run.</p>
-          </article>
-        </div>
-      </section>
-
-      <footer className="site-footer">
-        <span>© ClutchTopUp</span>
-
-        <div>
-          <Link href="/games">Games</Link>
-          <Link href="/auth/login">Log in</Link>
-          <Link href="/auth/signup">Register</Link>
-        </div>
-      </footer>
+        <SiteFooter />
+      </div>
     </main>
   );
 }
