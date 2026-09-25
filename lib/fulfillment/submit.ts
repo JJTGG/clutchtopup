@@ -316,7 +316,7 @@ async function getOrCreateFulfillmentRequest(
       status: "queued",
       request_data: requestData,
       response_data: {},
-      attempt: 0,
+      attempt: 1,
     })
     .select(selectFields)
     .single();
@@ -642,21 +642,21 @@ export async function submitFulfillment(
       `fulfillment:${item.id}:${providerName}`;
 
     const request: FulfillmentRequest = {
-  providerProductId:
-    mapping.provider_product_id,
-  gameSlug,
-  region:
-    mapping.region ??
-    (typeof rawFulfillmentData.region ===
-    "string"
-      ? rawFulfillmentData.region
-      : undefined),
-  playerIdentifiers,
-  quantity: item.quantity,
-  idempotencyKey,
-  externalOrderId:
-    `${order.order_number}:${item.id}`,
-};
+      providerProductId:
+        mapping.provider_product_id,
+      gameSlug,
+      region:
+        mapping.region ??
+        (typeof rawFulfillmentData.region ===
+        "string"
+          ? rawFulfillmentData.region
+          : undefined),
+      playerIdentifiers,
+      quantity: item.quantity,
+      idempotencyKey,
+      externalOrderId:
+        `${order.order_number}:${item.id}`,
+    };
 
     const fulfillmentRequest =
       await getOrCreateFulfillmentRequest(
@@ -891,7 +891,7 @@ export async function submitFulfillment(
         result.status ===
           "processing" ||
         result.status === "pending",
-  );
+    );
 
   return {
     fulfillmentRequestId:
