@@ -5,7 +5,8 @@ import { getPaymentProvider } from "@/lib/payments/providers";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const PROVIDER = "monnify";
-const FULFILLMENT_PROVIDER = "gamecore";
+const FULFILLMENT_PROVIDER =
+  process.env.FULFILLMENT_PROVIDER ?? "gamecore";
 
 export async function POST(
   request: Request,
