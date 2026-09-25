@@ -432,7 +432,7 @@ async function resolveGame(
 ): Promise<NexusGame> {
   const response =
     await nexusFetch<unknown>(
-      "/api/v1/games/",
+      "/api/v1/games",
     );
 
   const games =
