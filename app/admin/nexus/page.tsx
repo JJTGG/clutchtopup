@@ -1,8 +1,78 @@
 import Link from "next/link";
 
 import { requireAdmin } from "@/lib/admin/auth";
-import { nexusProvider } from "@/lib/fulfillment/providers/nexus";
 import { getNexusSandboxStatus } from "@/lib/fulfillment/providers/nexus-sandbox";
+
+type ProbeResult = {
+  name: string;
+  path: string;
+  status: number | null;
+  ok: boolean;
+  body: string;
+};
+
+async function probe(
+  name: string,
+  path: string,
+): Promise<ProbeResult> {
+  const baseUrl = process.env.NEXUS_BASE_URL;
+
+  if (!baseUrl) {
+    return {
+      name,
+      path,
+      status: null,
+      ok: false,
+      body: "NEXUS_BASE_URL is not configured.",
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${baseUrl.replace(/\/+$/, "")}${path}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Shop ${
+            process.env.NEXUS_SHOP_TOKEN ?? ""
+          }`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      },
+    );
+
+    const text = await response.text();
+
+    let body = text;
+
+    try {
+      const parsed = JSON.parse(text);
+      body = JSON.stringify(parsed);
+    } catch {
+      body = text || "(empty response)";
+    }
+
+    return {
+      name,
+      path,
+      status: response.status,
+      ok: response.ok,
+      body: body.slice(0, 1000),
+    };
+  } catch (error) {
+    return {
+      name,
+      path,
+      status: null,
+      ok: false,
+      body:
+        error instanceof Error
+          ? error.message
+          : "Request failed.",
+    };
+  }
+}
 
 export default async function NexusAdminPage() {
   await requireAdmin();
@@ -13,38 +83,44 @@ export default async function NexusAdminPage() {
       >
     | null = null;
 
-  let products:
-    | Awaited<
-        ReturnType<
-          typeof nexusProvider.getProducts
-        >
-      >
-    | null = null;
-
-  let error: string | null = null;
+  let sandboxError: string | null = null;
 
   try {
     sandboxStatus =
       await getNexusSandboxStatus();
-
-    if (
-      sandboxStatus.mode !== "sandbox" ||
-      sandboxStatus.realMoney !== false
-    ) {
-      error =
-        "Nexus did not identify this environment as a non-real-money sandbox. Catalog lookup was blocked.";
-    } else {
-      products =
-        await nexusProvider.getProducts(
-          "test-1",
-        );
-    }
-  } catch (err) {
-    error =
-      err instanceof Error
-        ? err.message
-        : "Nexus diagnostic failed.";
+  } catch (error) {
+    sandboxError =
+      error instanceof Error
+        ? error.message
+        : "Sandbox check failed.";
   }
+
+  const probes = await Promise.all([
+    probe(
+      "Games",
+      "/api/v1/games/",
+    ),
+    probe(
+      "Games (no trailing slash)",
+      "/api/v1/games",
+    ),
+    probe(
+      "Catalog",
+      "/api/v1/catalog",
+    ),
+    probe(
+      "Test categories",
+      "/api/v1/categories?gameId=test-1",
+    ),
+    probe(
+      "Test top-up products",
+      "/api/v1/products?categoryId=test-1:det-topup",
+    ),
+    probe(
+      "Test code products",
+      "/api/v1/products?categoryId=test-1:det-codes",
+    ),
+  ]);
 
   return (
     <main className="admin-shell">
@@ -54,7 +130,7 @@ export default async function NexusAdminPage() {
             NEXUS DIAGNOSTIC
           </p>
 
-          <h1>Sandbox connection</h1>
+          <h1>Sandbox API probe</h1>
         </div>
 
         <Link href="/admin">
@@ -99,113 +175,66 @@ export default async function NexusAdminPage() {
             </>
           ) : (
             <p>
-              Sandbox status could not be
-              retrieved.
+              {sandboxError ??
+                "Sandbox status unavailable."}
             </p>
           )}
         </article>
-
-        {error ? (
-          <article className="admin-card">
-            <p className="eyebrow">
-              DIAGNOSTIC ERROR
-            </p>
-
-            <h2>Catalog lookup blocked</h2>
-
-            <p>{error}</p>
-          </article>
-        ) : (
-          <article className="admin-card">
-            <p className="eyebrow">
-              TEST SERVICE
-            </p>
-
-            <h2>test-1 catalog</h2>
-
-            <p>
-              Deterministic Nexus sandbox
-              products returned by the provider
-              adapter.
-            </p>
-
-            <div>
-              <strong>
-                {products?.length ?? 0}
-              </strong>{" "}
-              products returned
-            </div>
-          </article>
-        )}
       </section>
 
-      {products &&
-        products.length > 0 && (
-          <section className="admin-grid">
-            {products.map((product) => (
-              <article
-                key={product.providerProductId}
-                className="admin-card"
+      <section className="admin-card">
+        <p className="eyebrow">
+          ENDPOINT PROBES
+        </p>
+
+        <h2>What does Nexus actually expose?</h2>
+
+        <p>
+          These requests are read-only. No orders are
+          created and no sandbox balance is consumed.
+        </p>
+
+        <div>
+          {probes.map((result) => (
+            <article
+              key={result.path}
+              className="admin-card"
+            >
+              <div className="admin-stat">
+                <span>
+                  {result.name}
+                </span>
+
+                <strong>
+                  {result.status === null
+                    ? "ERROR"
+                    : `${result.status} ${
+                        result.ok
+                          ? "OK"
+                          : "ERROR"
+                      }`}
+                </strong>
+              </div>
+
+              <p>
+                <code>
+                  {result.path}
+                </code>
+              </p>
+
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  overflowWrap:
+                    "anywhere",
+                }}
               >
-                <p className="eyebrow">
-                  {product.providerProductId}
-                </p>
-
-                <h2>{product.name}</h2>
-
-                <div className="admin-stat">
-                  <span>Price</span>
-                  <strong>
-                    ${product.cost.toFixed(3)}
-                  </strong>
-                </div>
-
-                <div className="admin-stat">
-                  <span>Currency</span>
-                  <strong>
-                    {product.currency}
-                  </strong>
-                </div>
-
-                <div className="admin-stat">
-                  <span>Available</span>
-                  <strong>
-                    {product.available
-                      ? "YES"
-                      : "NO"}
-                  </strong>
-                </div>
-
-                <div>
-                  <strong>
-                    Delivery fields
-                  </strong>
-
-                  {product.fulfillmentFields
-                    .length === 0 ? (
-                    <p>None</p>
-                  ) : (
-                    <ul>
-                      {product.fulfillmentFields.map(
-                        (field) => (
-                          <li
-                            key={field.key}
-                          >
-                            {field.label}{" "}
-                            ({field.type})
-                            {field.required
-                              ? " — required"
-                              : " — optional"}
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  )}
-                </div>
-              </article>
-            ))}
-          </section>
-        )}
+                {result.body}
+              </pre>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="admin-card">
         <p className="eyebrow">
@@ -215,12 +244,10 @@ export default async function NexusAdminPage() {
         <h2>No side effects</h2>
 
         <p>
-          This diagnostic only checks the Nexus
-          sandbox environment and reads the
-          deterministic test catalog. It does not
-          create orders, charge the sandbox balance,
-          modify Supabase, or expose the Nexus shop
-          token.
+          This diagnostic only performs GET requests
+          against the Nexus sandbox. It does not create
+          orders, charge the sandbox balance, modify
+          Supabase, or expose the Nexus shop token.
         </p>
       </section>
     </main>
