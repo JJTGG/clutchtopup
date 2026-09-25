@@ -269,7 +269,7 @@ export async function runNexusSandboxTest(
       orderId: order.id,
       orderNumber: order.order_number,
       fulfillmentRequestId: fulfillmentResult.fulfillmentRequestId,
-      providerReference: fulfillmentResult.providerReference ?? undefined,
+      providerReference: fulfillmentResult.providerReferences?.[0],
       fulfillmentStatus: fulfillmentResult.status,
     };
   } catch (error) {
